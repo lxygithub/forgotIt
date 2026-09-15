@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { serializeNote, noteInclude, attachToNote, computeType } from '@/lib/note-repo';
+import { logSync } from '@/lib/sync-server';
+import { indexNoteAsync } from '@/lib/embedding';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,6 +97,8 @@ export async function POST(req: NextRequest) {
     });
 
     await attachToNote(note.id, attachmentIds);
+    await logSync('note', note.id, 'upsert');
+    indexNoteAsync(note.id);
 
     const full = await db.note.findUnique({ where: { id: note.id }, include: noteInclude });
     return NextResponse.json({ note: serializeNote(full!) }, { status: 201 });

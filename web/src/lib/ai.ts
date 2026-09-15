@@ -75,6 +75,7 @@ export interface OrganizeResult {
   category: string;
   tags: string[];
   summary: string;
+  semanticKeywords: string[];
 }
 
 export async function aiOrganizeNote(input: {
@@ -87,7 +88,8 @@ export async function aiOrganizeNote(input: {
     `你必须从以下固定类目中选出最贴切的一个：${DEFAULT_CATEGORIES.join(' / ')}。`,
     '自由标签 3-6 个，每个不超过 8 个字，贴合笔记主题（人物、地点、事项、物品等具体词）。',
     '摘要不超过 50 字，陈述句，不加修饰。',
-    '只输出一个 JSON 对象，格式：{"category":"类目名","tags":["标签1","标签2"],"summary":"一句话摘要"}',
+    'semanticKeywords：6-10 个语义检索关键词，包含同义词、口语说法、相关概念（例如体检报告可给：健康/医院/复查/身体指标/看病/诊断/化验），不要与正文完全重复的词。',
+    '只输出一个 JSON 对象，格式：{"category":"类目名","tags":["标签1"],"summary":"摘要","semanticKeywords":["词1","词2"]}',
   ].join('\n');
 
   const parts: string[] = [];
@@ -101,6 +103,7 @@ export async function aiOrganizeNote(input: {
   const result = await llmJson<OrganizeResult>(system, parts.join('\n\n'));
   if (!result) return null;
   const { category, tags, summary } = result.data;
+  const rawKeywords = (result.data as { semanticKeywords?: unknown }).semanticKeywords;
 
   // 校验与收敛：类目必须命中固定列表，标签数量与长度受限
   const safeCategory = DEFAULT_CATEGORIES.includes(category as (typeof DEFAULT_CATEGORIES)[number])
@@ -113,11 +116,57 @@ export async function aiOrganizeNote(input: {
     : [];
   const safeSummary = typeof summary === 'string' && summary.trim() ? summary.trim().slice(0, 60) : '';
 
+  const safeKeywords = Array.isArray(rawKeywords)
+    ? [...new Set(rawKeywords.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim().slice(0, 16)))]
+        .filter((t) => t.length > 0)
+        .slice(0, 10)
+    : [];
+
   return {
     category: safeCategory,
     tags: safeTags.length > 0 ? safeTags : ['待整理'],
     summary: safeSummary || '这篇笔记还没摘要。',
+    semanticKeywords: safeKeywords,
   };
+}
+
+// ---------- 语义检索辅助（文档 8 节：查询扩展 + 索引增强） ----------
+
+/** 为存量笔记补生成语义关键词（重索引用，轻量 prompt） */
+export async function aiSemanticKeywords(
+  title?: string | null,
+  summary?: string | null,
+  content?: string | null
+): Promise<string[]> {
+  const parts: string[] = [];
+  if (title) parts.push(`【标题】${title}`);
+  if (summary) parts.push(`【摘要】${summary}`);
+  if (content) parts.push(`【正文】\n${content.slice(0, 800)}`);
+  if (parts.length === 0) return [];
+  const system = [
+    '给笔记生成 6-10 个语义检索关键词：同义词、口语说法、相关概念、上位词。',
+    '只输出 JSON：{"keywords":["词1","词2"]}',
+  ].join('\n');
+  const result = await llmJson<{ keywords?: unknown }>(system, parts.join('\n\n'));
+  if (!result || !Array.isArray(result.data.keywords)) return [];
+  return [...new Set(result.data.keywords.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim().slice(0, 16)))]
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+/** 语义检索查询扩展：把用户问题扩成相关词集合（文档 8 节双路检索的语义路） */
+export async function aiExpandQuery(query: string): Promise<string[]> {
+  const system = [
+    '把用户的搜索意图扩写成 4-10 个相关检索词：同义词、口语说法、相关概念。',
+    '保持原意，不要过度发挥。只输出 JSON：{"keywords":["词1","词2"]}',
+  ].join('\n');
+  const result = await llmJson<{ keywords?: unknown }>(system, query);
+  if (!result || !Array.isArray(result.data.keywords)) return [];
+  const expanded = result.data.keywords
+    .filter((t) => typeof t === 'string' && t.trim())
+    .map((t) => t.trim().slice(0, 20))
+    .filter(Boolean);
+  return [query, ...expanded].slice(0, 11);
 }
 
 // ---------- 16.4 图片理解（VLM 描述 + OCR） ----------

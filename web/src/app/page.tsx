@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { PenLine } from 'lucide-react';
 import { toast } from 'sonner';
@@ -10,12 +10,14 @@ import { AppHeader, type AppView } from '@/components/forgotit/app-header';
 import { AskView } from '@/components/forgotit/ask-view';
 import { NotesView, type NotesFilter } from '@/components/forgotit/notes-view';
 import { NoteEditor } from '@/components/forgotit/note-editor';
+import { SyncPanel } from '@/components/forgotit/sync-panel';
 import { TagsView } from '@/components/forgotit/tags-view';
 import { TrashView } from '@/components/forgotit/trash-view';
 import { BRAND } from '@/lib/brand';
 import { getNote, type NoteDto, type TagWithCount } from '@/lib/api';
+import { useSyncStore } from '@/lib/sync-store';
 
-const INITIAL_FILTER: NotesFilter = { q: '', type: 'all', pinned: false, tag: null };
+const INITIAL_FILTER: NotesFilter = { q: '', type: 'all', pinned: false, tag: null, mode: 'keyword' };
 
 export default function Home() {
   const [view, setView] = useState<AppView>('notes');
@@ -24,7 +26,16 @@ export default function Home() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorNote, setEditorNote] = useState<NoteDto | null>(null);
 
+  // 同步引擎：初始化 + 服务端变更驱动列表刷新
+  const initSync = useSyncStore((s) => s.init);
+  const dataVersion = useSyncStore((s) => s.dataVersion);
+  useEffect(() => {
+    initSync();
+  }, [initSync]);
+
   const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  // 同步引擎拉到服务端变更时也会触发全列表刷新
+  const combinedRefresh = refreshKey + dataVersion;
 
   const openNewNote = useCallback(() => {
     setEditorNote(null);
@@ -42,7 +53,7 @@ export default function Home() {
   }, []);
 
   const handleSelectTag = useCallback((tag: TagWithCount) => {
-    setFilter({ q: '', type: 'all', pinned: false, tag });
+    setFilter({ q: '', type: 'all', pinned: false, tag, mode: 'keyword' });
     setView('notes');
   }, []);
 
@@ -71,7 +82,7 @@ export default function Home() {
               <NotesView
                 filter={filter}
                 onFilterChange={setFilter}
-                refreshKey={refreshKey}
+                refreshKey={combinedRefresh}
                 onEditNote={(note) => {
                   setEditorNote(note);
                   setEditorOpen(true);
@@ -82,18 +93,20 @@ export default function Home() {
           )}
           {view === 'tags' && (
             <motion.div key="tags" {...viewMotionProps}>
-              <TagsView refreshKey={refreshKey} onSelectTag={handleSelectTag} />
+              <TagsView refreshKey={combinedRefresh} onSelectTag={handleSelectTag} />
             </motion.div>
           )}
           {view === 'trash' && (
             <motion.div key="trash" {...viewMotionProps}>
-              <TrashView refreshKey={refreshKey} />
+              <TrashView refreshKey={combinedRefresh} />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
       <AppFooter />
+
+      <SyncPanel />
 
       {/* 新建笔记 FAB（仅笔记视图） */}
       <AnimatePresence>

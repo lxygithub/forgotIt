@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { serializeNote, noteInclude } from '@/lib/note-repo';
 import { aiOrganizeNote } from '@/lib/ai';
+import { logSync } from '@/lib/sync-server';
+import { indexNoteAsync } from '@/lib/embedding';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -59,8 +61,16 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       ],
     });
 
-    // 4. 摘要
-    await db.note.update({ where: { id }, data: { summary: result.summary } });
+    // 4. 摘要 + 语义关键词（同步索引用）
+    await db.note.update({
+      where: { id },
+      data: {
+        summary: result.summary,
+        semanticKeywords: result.semanticKeywords.length > 0 ? JSON.stringify(result.semanticKeywords) : null,
+      },
+    });
+    await logSync('note', id, 'upsert');
+    indexNoteAsync(id);
 
     const full = await db.note.findUnique({ where: { id }, include: noteInclude });
     return NextResponse.json({ note: serializeNote(full!) });

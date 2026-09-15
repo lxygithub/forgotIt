@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Search, X, Sparkles, PenLine } from 'lucide-react';
+import { Search, Sparkles, PenLine, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,23 +12,29 @@ import { BRAND } from '@/lib/brand';
 import {
   deleteNote,
   getStats,
+  hybridSearch,
   listNotes,
   seedDemoData,
+  semanticSearch,
   updateNote,
   type NoteDto,
   type NotesQuery,
   type StatsDto,
   type TagDto,
 } from '@/lib/api';
+import { mergeOverlay } from '@/lib/local-first';
+import { useSyncStore } from '@/lib/sync-store';
 import { cn } from '@/lib/utils';
 
 export type NotesFilterType = 'all' | 'text' | 'image';
+export type SearchMode = 'keyword' | 'semantic' | 'hybrid';
 
 export interface NotesFilter {
   q: string;
   type: NotesFilterType;
   pinned: boolean;
   tag: TagDto | null;
+  mode: SearchMode;
 }
 
 interface NotesViewProps {
@@ -45,16 +51,24 @@ const TYPE_CHIPS: { key: NotesFilterType; label: string }[] = [
   { key: 'image', label: '图片' },
 ];
 
+const MODE_CHIPS: { key: SearchMode; label: string; hint: string }[] = [
+  { key: 'keyword', label: BRAND.searchModeKeyword, hint: '按字面匹配' },
+  { key: 'semantic', label: BRAND.searchModeSemantic, hint: BRAND.semanticSearchHint },
+  { key: 'hybrid', label: BRAND.searchModeHybrid, hint: '双路检索 + RRF 合并' },
+];
+
 export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNewNote }: NotesViewProps) {
-  const [notes, setNotes] = useState<NoteDto[] | null>(null);
+  const [notes, setNotes] = useState<(NoteDto & { _pending?: boolean })[] | null>(null);
   const [stats, setStats] = useState<StatsDto | null>(null);
+  const [expansions, setExpansions] = useState<string[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [searchDraft, setSearchDraft] = useState(filter.q);
   const [seeding, setSeeding] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const overlay = useSyncStore((s) => s.overlay);
 
-  const filterKey = `${filter.q}|${filter.type}|${filter.pinned}|${filter.tag?.id ?? ''}|${refreshKey}|${reloadNonce}`;
+  const filterKey = `${filter.q}|${filter.type}|${filter.pinned}|${filter.tag?.id ?? ''}|${filter.mode}|${refreshKey}|${reloadNonce}`;
   const loading = notes === null || loadedKey !== filterKey;
 
   // 外部清空/改变搜索时同步输入框（官方推荐的 render 阶段状态调整模式）
@@ -75,19 +89,46 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
     };
     void (async () => {
       try {
-        const [notesRes, statsRes] = await Promise.all([
-          listNotes(query, ac.signal),
-          getStats(ac.signal).catch(() => null),
-        ]);
-        if (ac.signal.aborted) return;
+        let merged: (NoteDto & { _pending?: boolean })[] = [];
+        let expansionsRes: string[] = [];
+        if (filter.q && filter.mode === 'semantic') {
+          // 语义模式：查询扩展 + 向量检索（不走关键词过滤参数）
+          const [res, statsRes] = await Promise.all([
+            semanticSearch(filter.q, ac.signal),
+            getStats(ac.signal).catch(() => null),
+          ]);
+          if (ac.signal.aborted) return;
+          merged = mergeOverlay(res.notes, overlay, filter.q);
+          expansionsRes = res.expansions;
+          if (statsRes) setStats(statsRes);
+        } else if (filter.q && filter.mode === 'hybrid') {
+          // 混合模式：双路检索 + RRF 合并
+          const [res, statsRes] = await Promise.all([
+            hybridSearch(filter.q, ac.signal),
+            getStats(ac.signal).catch(() => null),
+          ]);
+          if (ac.signal.aborted) return;
+          merged = mergeOverlay(res.hits.map((h) => h.note), overlay, filter.q);
+          expansionsRes = res.expansions;
+          if (statsRes) setStats(statsRes);
+        } else {
+          // 关键词模式（默认）：/api/notes 原有过滤逻辑
+          const [notesRes, statsRes] = await Promise.all([
+            listNotes(query, ac.signal),
+            getStats(ac.signal).catch(() => null),
+          ]);
+          if (ac.signal.aborted) return;
+          merged = mergeOverlay(notesRes.notes, overlay, filter.q);
+          if (statsRes) setStats(statsRes);
+        }
         // 置顶优先，其余按更新时间倒序
-        const sorted = [...notesRes.notes].sort(
+        const sorted = [...merged].sort(
           (a, b) =>
             Number(b.pinned) - Number(a.pinned) ||
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         );
         setNotes(sorted);
-        if (statsRes) setStats(statsRes);
+        setExpansions(expansionsRes);
       } catch (err) {
         if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
         toast.error(err instanceof Error ? err.message : '加载笔记失败');
@@ -97,12 +138,12 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
       }
     })();
     return () => ac.abort();
-  }, [filter, filterKey, refreshKey]);
+  }, [filter, filterKey, refreshKey, overlay]);
 
   const hasFilter = Boolean(filter.q || filter.type !== 'all' || filter.pinned || filter.tag);
 
   const clearFilters = () => {
-    onFilterChange({ q: '', type: 'all', pinned: false, tag: null });
+    onFilterChange({ q: '', type: 'all', pinned: false, tag: null, mode: filter.mode });
     searchInputRef.current?.focus();
   };
 
@@ -194,6 +235,44 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
         )}
       </div>
 
+      {/* 搜索模式切换（有搜索词时展示） */}
+      {filter.q && (
+        <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="搜索模式">
+          {MODE_CHIPS.map((chip) => {
+            const active = filter.mode === chip.key;
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                title={chip.hint}
+                onClick={() => onFilterChange({ ...filter, mode: chip.key })}
+                className={cn(
+                  'inline-flex h-9 items-center gap-1 rounded-full border px-3 text-xs transition-colors sm:h-7',
+                  active
+                    ? 'border-transparent bg-primary text-primary-foreground'
+                    : 'bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                )}
+              >
+                <Sparkles className={cn('size-3', !active && 'hidden')} aria-hidden="true" />
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 语义扩展词 */}
+      {filter.q && expansions.length > 1 && filter.mode !== 'keyword' && (
+        <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="shrink-0">帮你按这些意思也找了：</span>
+          {expansions.slice(1, 7).map((term) => (
+            <span key={term} className="rounded-full bg-muted px-2 py-0.5">{term}</span>
+          ))}
+        </p>
+      )}
+
       {/* 过滤 chips + 统计 */}
       <div className="flex flex-wrap items-center gap-2">
         {TYPE_CHIPS.map((chip) => {
@@ -273,6 +352,7 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
               key={note.id}
               note={note}
               index={i}
+              pending={note._pending}
               onOpen={onEditNote}
               onTogglePin={handleTogglePin}
               onDelete={handleDelete}

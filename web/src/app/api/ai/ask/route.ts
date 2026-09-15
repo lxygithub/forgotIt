@@ -1,18 +1,15 @@
-// RAG 问答：检索（关键词多路匹配）+ 生成（带来源引用）
+// RAG 问答：检索（关键词 + 语义向量双路 → RRF 合并，文档第 8 节/D8）+ 生成（带来源引用）
 // POST /api/ai/ask  { question }
 // 对应文档 v2.0 第 8 节（混合检索 + 引用）与 16.3 节 Prompt
-// 原型环境：以 SQL 关键词多路匹配模拟向量检索，接口形态与 RAG 编排一致
 
 import { NextRequest, NextResponse } from 'next/server';
+import { noteInclude, serializeNote } from '@/lib/note-repo';
+import { aiRagAnswer, parseCitationIndexes, type RagChunk } from '@/lib/ai';
+import { hybridSearch } from '@/lib/search';
 import { db } from '@/lib/db';
-import { noteInclude } from '@/lib/note-repo';
-import { aiRagAnswer, parseCitationIndexes, extractKeywords, type RagChunk } from '@/lib/ai';
-import type { Note, NoteTag, Tag, Attachment } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
-
-type NoteWithAll = Note & { tags: (NoteTag & { tag: Tag })[]; attachments: Attachment[] };
+export const maxDuration = 90;
 
 const MAX_CHUNKS = 12;
 const SNIPPET_LEN = 400;
@@ -41,69 +38,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '问题不能为空' }, { status: 400 });
     }
 
-    // ---- 检索：关键词多路匹配（标题/正文/摘要/图片描述/OCR/标签名）----
-    const keywords = extractKeywords(question);
-    const matched = new Map<string, NoteWithAll>();
+    // ---- 检索：双路混合（关键词 + 语义向量）→ RRF(k=60) 合并（文档第 8 节） ----
+    const { hits } = await hybridSearch(question, { take: MAX_CHUNKS, withExpansions: false });
 
-    const searchWhere = (kw: string) => ({
-      deletedAt: null,
-      OR: [
-        { title: { contains: kw } },
-        { content: { contains: kw } },
-        { summary: { contains: kw } },
-        { attachments: { some: { OR: [{ ocrText: { contains: kw } }, { description: { contains: kw } }] } } },
-        { tags: { some: { tag: { name: { contains: kw } } } } },
-      ],
-    });
-
-    if (keywords.length > 0) {
-      const found = await db.note.findMany({
-        where: searchWhere(question),
-        include: { ...noteInclude, attachments: true },
-        orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
-        take: MAX_CHUNKS,
-      });
-      for (const n of found) matched.set(n.id, n);
-      // 长句滑窗补检
-      for (const kw of keywords) {
-        if (matched.size >= MAX_CHUNKS) break;
-        const more = await db.note.findMany({
-          where: searchWhere(kw),
-          include: { ...noteInclude, attachments: true },
-          orderBy: { updatedAt: 'desc' },
-          take: MAX_CHUNKS,
-        });
-        for (const n of more) {
-          if (matched.size >= MAX_CHUNKS) break;
-          matched.set(n.id, n);
-        }
-      }
-    }
-
-    // 兜底：命中不足时补充最近的笔记作为候选（对应文档 8 节双路检索思路的简化实现）
-    if (matched.size < 5) {
+    // 命中不足时兜底补充最近笔记，保证问答可用性
+    type NoteDtoT = ReturnType<typeof serializeNote>;
+    let candidates: NoteDtoT[] = hits.map((h) => h.note);
+    if (candidates.length < 5) {
       const recent = await db.note.findMany({
         where: { deletedAt: null },
         include: { ...noteInclude, attachments: true },
         orderBy: { updatedAt: 'desc' },
         take: MAX_CHUNKS,
       });
+      const seen = new Set(candidates.map((n) => n.id));
       for (const n of recent) {
-        if (matched.size >= MAX_CHUNKS) break;
-        matched.set(n.id, n);
+        if (candidates.length >= MAX_CHUNKS) break;
+        if (!seen.has(n.id)) candidates.push(serializeNote(n));
       }
     }
 
-    const candidates = [...matched.values()].slice(0, MAX_CHUNKS);
-    const chunks: RagChunk[] = candidates.map((n, i) => ({
+    const chunks: RagChunk[] = candidates.slice(0, MAX_CHUNKS).map((n, i) => ({
       index: i + 1,
       noteId: n.id,
       title: n.title || '无标题笔记',
-      snippet: buildSnippet(n),
+      snippet: buildSnippet({
+        title: n.title ?? null,
+        summary: n.summary ?? null,
+        content: n.content ?? null,
+        attachments: n.attachments.map((a) => ({ description: a.description ?? null, ocrText: a.ocrText ?? null })),
+      }),
     }));
 
     // ---- 生成：带来源编号的 RAG 回答 ----
-    console.error(`[ask] chunks=${chunks.length}`);
     const answer = await aiRagAnswer(question, chunks);
 
     // ---- 引用：解析 [n] 并映射回笔记；未引用时给 top3 兜底 ----

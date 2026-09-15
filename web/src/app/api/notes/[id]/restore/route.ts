@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { serializeNote, noteInclude } from '@/lib/note-repo';
+import { logSync } from '@/lib/sync-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,7 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ note: serializeNote(full!) });
     }
     await db.note.update({ where: { id }, data: { deletedAt: null } });
+    await logSync('note', id, 'upsert');
     const full = await db.note.findUnique({ where: { id }, include: noteInclude });
     return NextResponse.json({ note: serializeNote(full!) });
   } catch (err) {

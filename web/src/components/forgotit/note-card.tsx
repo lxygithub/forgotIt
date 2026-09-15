@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { FileText, Image as ImageIcon, Images, Pin, PinOff, Pencil, Trash2 } from 'lucide-react';
+import { FileText, Image as ImageIcon, Images, CloudOff, Pin, PinOff, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { NoteDto, TagDto } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,7 @@ interface NoteCardProps {
   onTogglePin: (note: NoteDto) => void;
   onDelete: (note: NoteDto) => void;
   index?: number;
+  pending?: boolean; // 本地已改、尚未同步到其他设备
 }
 
 function TypeIcon({ type }: { type: NoteDto['type'] }) {
@@ -38,7 +39,7 @@ function TagPill({ tag }: { tag: TagDto }) {
   );
 }
 
-export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0 }: NoteCardProps) {
+export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pending }: NoteCardProps) {
   const firstImage = useMemo(
     () => note.attachments.find((a) => a.mimeType.startsWith('image/')),
     [note.attachments]
@@ -160,6 +161,12 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0 }: Not
           {note.localOnly && (
             <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px]">
               仅本地
+            </span>
+          )}
+          {pending && (
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary">
+              <CloudOff className="size-2.5" aria-hidden="true" />
+              待同步
             </span>
           )}
         </div>

@@ -206,3 +206,99 @@ export function getStats(signal?: AbortSignal): Promise<StatsDto> {
 export function seedDemoData(signal?: AbortSignal): Promise<{ ok: boolean }> {
   return request('/api/seed', { method: 'POST', signal });
 }
+
+// ---------- 搜索（关键词 / 语义 / 混合，文档第 8 节） ----------
+
+export interface SearchHitDto {
+  note: NoteDto;
+  keywordRank: number | null;
+  semanticRank: number | null;
+  rrfScore: number;
+}
+
+export interface SemanticResult {
+  notes: NoteDto[];
+  expansions: string[];
+}
+
+export function semanticSearch(query: string, signal?: AbortSignal): Promise<SemanticResult> {
+  return request('/api/search/semantic', { method: 'POST', body: JSON.stringify({ query }), signal });
+}
+
+export function hybridSearch(query: string, signal?: AbortSignal): Promise<{ hits: SearchHitDto[]; expansions: string[] }> {
+  return request('/api/search/hybrid', { method: 'POST', body: JSON.stringify({ query }), signal });
+}
+
+export function reindexEmbeddings(signal?: AbortSignal): Promise<{ ok: boolean; indexed: number; keywordsGenerated: number }> {
+  return request('/api/ai/reindex', { method: 'POST', signal });
+}
+
+// ---------- 同步（文档第 6.4/6.5 节） ----------
+
+export interface SyncPushChange {
+  entity: 'note';
+  op: 'upsert' | 'delete';
+  data: {
+    id?: string;
+    title?: string | null;
+    content?: string | null;
+    summary?: string | null;
+    semanticKeywords?: string | null;
+    pinned?: boolean;
+    localOnly?: boolean;
+    type?: string;
+    deletedAt?: string | null;
+    updatedAt: string;
+    baseVersion?: number;
+    newVersion?: number;
+  };
+}
+
+export interface SyncPushResult {
+  id: string;
+  noteId?: string;
+  status: 'applied' | 'conflict' | 'local-only-skipped' | 'invalid';
+  note?: NoteDto;
+}
+
+export interface SyncPushResponse {
+  results: SyncPushResult[];
+  serverTime: string;
+}
+
+export function syncPush(body: { deviceId: string; changes: SyncPushChange[] }, signal?: AbortSignal): Promise<SyncPushResponse> {
+  return request('/api/sync/push', { method: 'POST', body: JSON.stringify(body), signal });
+}
+
+export interface SyncPullChange {
+  seq: number;
+  op: 'upsert' | 'delete';
+  entityId: string;
+  note: NoteDto | null;
+}
+
+export function syncPull(since: number, signal?: AbortSignal): Promise<{ cursor: number; changes: SyncPullChange[]; serverTime: string }> {
+  return request(`/api/sync/pull?since=${encodeURIComponent(since)}`, { signal });
+}
+
+export interface ConflictDto {
+  id: string;
+  noteId: string;
+  noteTitle: string;
+  losingDevice: string | null;
+  losingUpdatedAt: string;
+  losingTitle: string;
+  losingContent: string;
+  winnerUpdatedAt: string;
+  winnerTitle: string;
+  winnerContent: string;
+  createdAt: string;
+}
+
+export function getConflicts(signal?: AbortSignal): Promise<{ conflicts: ConflictDto[] }> {
+  return request('/api/sync/conflicts', { signal });
+}
+
+export function resolveConflict(id: string, action: 'restore-mine' | 'discard', signal?: AbortSignal): Promise<{ ok: boolean; note?: NoteDto }> {
+  return request('/api/sync/conflicts', { method: 'POST', body: JSON.stringify({ id, action }), signal });
+}

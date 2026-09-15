@@ -22,14 +22,13 @@ import { Markdown } from '@/components/forgotit/markdown';
 import { BRAND } from '@/lib/brand';
 import {
   aiOrganize,
-  createNote,
-  deleteNote,
-  updateNote,
   uploadAttachment,
   type AttachmentDto,
   type NoteDto,
   type NoteType,
 } from '@/lib/api';
+import { createNoteLocalFirst, deleteNoteLocalFirst, updateNoteLocalFirst } from '@/lib/local-first';
+import { useSyncStore } from '@/lib/sync-store';
 
 interface NoteEditorProps {
   open: boolean;
@@ -130,24 +129,28 @@ export function NoteEditor({ open, note, onOpenChange, onSaved }: NoteEditorProp
       type,
     };
     if (isNew) {
-      const res = await createNote({ ...body, attachmentIds });
-      return res.note;
+      // 本地优先：离线也能记，联网后自动同步（离线时 attachmentIds 为空，附件不支持离线暂存）
+      return createNoteLocalFirst({ ...body, attachmentIds: localOnly ? [] : attachmentIds });
     }
-    const res = await updateNote(note.id, body);
-    return res.note;
+    return updateNoteLocalFirst(note.id, body, note);
   };
 
   const handleSave = async (organize: boolean) => {
     setSaving(true);
-    const toastId = toast.loading(BRAND.syncToast);
+    const offline = useSyncStore.getState().offlineMode;
+    const toastId = toast.loading(offline ? '已先记在本地，联网后自动同步…' : BRAND.syncToast);
     try {
       const saved = await saveNote();
       if (organize) {
-        toast.loading(BRAND.organizeLoadingToast, { id: toastId });
-        await aiOrganize(saved.id);
-        toast.success(BRAND.organizeDoneToast, { id: toastId });
+        if (offline) {
+          toast.warning('离线状态下 AI 不可用。笔记已存好，联网后可再让 AI 整理。', { id: toastId });
+        } else {
+          toast.loading(BRAND.organizeLoadingToast, { id: toastId });
+          await aiOrganize(saved.id);
+          toast.success(BRAND.organizeDoneToast, { id: toastId });
+        }
       } else {
-        toast.success('已保存。', { id: toastId });
+        toast.success(offline ? '已存进脑子（本地）。' : '已保存。', { id: toastId });
       }
       onSaved();
       onOpenChange(false);
@@ -162,7 +165,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved }: NoteEditorProp
     if (isNew) return;
     setDeleting(true);
     try {
-      await deleteNote(note.id);
+      await deleteNoteLocalFirst(note.id, note);
       toast.success(`已移入回收站。${BRAND.trashHint}`);
       onSaved();
       onOpenChange(false);

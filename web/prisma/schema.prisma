@@ -17,14 +17,59 @@ model Note {
   title     String?
   content   String? // Markdown 正文；纯文本视为不含语法的 Markdown
   summary   String? // AI 生成摘要（列表页展示）
+  semanticKeywords String? // JSON string[]：LLM 语义关键词（同义词/相关概念，语义检索索引用）
   localOnly Boolean      @default(false) // 隐私标记：不走云端、不同步
   pinned    Boolean      @default(false)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
   deletedAt DateTime? // 软删除（回收站，30 天）
-  version   Int          @default(1)
+  version   Int          @default(1) // 同步版本号（文档 6.5 LWW）
   tags      NoteTag[]
   attachments Attachment[]
+  embeddings  Embedding[]
+}
+
+// 向量索引（文档 6.3 embeddings 表：记录 model_name / model_version，换模型后增量重索引）
+// 原型用 SQLite 存 JSON 向量 + JS 余弦；生产环境换 PostgreSQL pgvector（vector(768) + HNSW）
+model Embedding {
+  id          String  @id @default(cuid())
+  noteId      String
+  note        Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  chunkIndex  Int     @default(0)
+  modelName   String  // 原型：hash-ngram-zh-v1；生产：gemma-embedding-768
+  modelVersion Int    @default(1)
+  dim         Int
+  vector      String // JSON number[]（L2 归一化后）
+  updatedAt   DateTime @updatedAt
+
+  @@unique([noteId, chunkIndex, modelName])
+  @@index([modelName, modelVersion])
+}
+
+// 同步流水（文档 6.4 /sync/pull：按 seq 游标增量拉取）
+model SyncLog {
+  seq        Int      @id @default(autoincrement())
+  entityType String // note
+  entityId   String
+  op         String // upsert | delete
+  deviceId   String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityId])
+}
+
+// LWW 冲突快照（文档 6.5：落败方变更不丢弃，保留为版本快照供用户查看/恢复）
+model ConflictSnapshot {
+  id              String   @id @default(cuid())
+  noteId          String
+  losingDevice    String?
+  losingPayload   String // JSON：落败方完整笔记内容
+  losingUpdatedAt DateTime
+  winnerUpdatedAt DateTime
+  resolved        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([noteId])
 }
 
 // 标签（混合标签体系）

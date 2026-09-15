@@ -17,4 +17,18 @@ export const BRAND = {
   editorLocalOnlyLabel: '仅本地（不上传不同步）',
   uploadingImageText: '正在看图…',
   exampleQuestions: ['帮我找关于发票的记录', '总结我的旅行笔记', '我记过哪些好看餐厅'],
+  // 语义搜索与同步（v1.1 新增）
+  semanticSearchHint: '语义模式：按意思找，不用记得原话。',
+  searchModeKeyword: '关键词',
+  searchModeSemantic: '语义',
+  searchModeHybrid: '混合',
+  syncPanelTitle: '同步与设备',
+  syncNowText: '立即同步',
+  syncOfflineLabel: '离线模式',
+  syncOfflineDesc: '先记在脑子里，联网后自动同步到其他设备。',
+  pendingBadgeText: '待同步',
+  reindexText: '重建语义索引',
+  conflictTitle: '冲突记录',
+  conflictKeepMine: '用我的版本',
+  conflictKeepServer: '用服务器版本',
 } as const;

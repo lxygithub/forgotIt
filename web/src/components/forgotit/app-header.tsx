@@ -1,10 +1,11 @@
 'use client';
 
-import { Brain } from 'lucide-react';
+import { Brain, CloudOff, Loader2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/forgotit/theme-toggle';
 import { BRAND } from '@/lib/brand';
 import { cn } from '@/lib/utils';
+import { useSyncStore } from '@/lib/sync-store';
 
 export type AppView = 'notes' | 'ask' | 'tags' | 'trash';
 
@@ -21,6 +22,12 @@ interface AppHeaderProps {
 }
 
 export function AppHeader({ view, onViewChange }: AppHeaderProps) {
+  const syncOpen = useSyncStore((s) => s.panelOpen);
+  const setSyncOpen = useSyncStore((s) => s.setPanelOpen);
+  const syncStatus = useSyncStore((s) => s.status);
+  const pendingCount = useSyncStore((s) => s.pendingCount);
+  const offlineMode = useSyncStore((s) => s.offlineMode);
+
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
@@ -67,8 +74,33 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
           </div>
         </nav>
 
-        {/* 右侧：主题切换 + 本地模式徽章 */}
+        {/* 右侧：同步状态 + 主题切换 + 本地模式徽章 */}
         <div className="ml-auto flex items-center gap-2 sm:ml-3">
+          <button
+            type="button"
+            aria-label={offlineMode ? '同步：离线模式，点击打开同步面板' : '同步状态，点击打开同步面板'}
+            onClick={() => setSyncOpen(!syncOpen)}
+            className={cn(
+              'relative inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9',
+              offlineMode && 'text-amber-600 dark:text-amber-500'
+            )}
+          >
+            {syncStatus === 'syncing' ? (
+              <Loader2 className="size-[18px] animate-spin" aria-hidden="true" />
+            ) : offlineMode ? (
+              <CloudOff className="size-[18px]" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="size-[18px]" aria-hidden="true" />
+            )}
+            {pendingCount > 0 && !offlineMode && (
+              <span
+                aria-hidden="true"
+                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
+              >
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
+          </button>
           <Badge
             variant="outline"
             className="hidden md:inline-flex border-primary/30 text-primary"

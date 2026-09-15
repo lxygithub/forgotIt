@@ -7,6 +7,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { serializeNote, noteInclude, attachToNote } from '@/lib/note-repo';
+import { logSync } from '@/lib/sync-server';
+import { indexNoteAsync } from '@/lib/embedding';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +52,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     if (Array.isArray(body.attachmentIds) && body.attachmentIds.length > 0) {
       await attachToNote(id, body.attachmentIds);
     }
+    await logSync('note', id, 'upsert');
+    indexNoteAsync(id);
 
     const full = await db.note.findUnique({ where: { id }, include: noteInclude });
     return NextResponse.json({ note: serializeNote(full!) });
@@ -68,14 +72,16 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (!existing) return NextResponse.json({ error: '笔记不存在' }, { status: 404 });
 
     if (permanent) {
-      // 记录墓碑（文档 6.5：软删除 + 墓碑，确保多端一致；原型中用于彻底删除审计）
+      // 记录墓碑（文档 6.5：软删除 + 墓碑，确保多端一致）+ 同步流水
       await db.tombstone
         .create({ data: { entityType: 'note', entityId: id } })
         .catch(() => undefined);
+      await logSync('note', id, 'delete');
       // 附件与标签关联由 onDelete: Cascade 一并清理
       await db.note.delete({ where: { id } });
     } else {
       await db.note.update({ where: { id }, data: { deletedAt: new Date(), pinned: false } });
+      await logSync('note', id, 'delete');
     }
 
     return NextResponse.json({ ok: true });
