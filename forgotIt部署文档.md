@@ -514,22 +514,32 @@ Workers 上由 `/uploads/[...key]` 路由从 R2 流式读取，鉴权门禁（`/
 
 ```bash
 cd web && bun install                       # wrangler 已在 devDependencies
-bunx wrangler login
+bunx wrangler login                         # 或用 API Token：export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx（CI/无人值守推荐，本次实战即此方式）
 bunx wrangler d1 create forgotit            # → 把输出的 database_id 填进 web/wrangler.jsonc
 bunx wrangler r2 bucket create forgotit-uploads
 bun run d1:schema                           # prisma migrate diff 生成 d1/schema.sql
-bunx wrangler d1 execute forgotit --remote --file d1/schema.sql
+bunx wrangler d1 execute forgotit --remote --file d1/schema.sql -y   # -y 跳过交互确认（CI/脚本环境必需）
 ```
+
+> **Token 最小权限（实战验证）**：`Workers Scripts : Edit` + `D1 : Edit` +
+> `Workers R2 Storage : Edit` 三项即可完成本节全部操作与部署；缺 `User Details : Read`
+> 只会让 `wrangler whoami` 少显示邮箱，不影响任何操作。建议用 Custom Token 而非 Global Key；
+> token 一旦泄露（如误发到聊天/提交入库）应立即在 dashboard 撤销。
 
 ### 11.3 Secrets 与 vars
 
 ```bash
 bunx wrangler secret put NEXTAUTH_SECRET      # openssl rand -base64 32
-bunx wrangler secret put AUTH_PASSWORD_HASH   # 生成方式：bun run hash-password <你的密码>
-bunx wrangler secret put ZAI_BASE_URL         # 可选：不配置则 AI 功能按 §5 降级
+# 登录凭证二选一：生产推荐 scrypt 哈希（bun run hash-password <你的密码>），
+# 明文 AUTH_PASSWORD 也能工作（本次实战即用明文），两种都是 secret 不入库
+bunx wrangler secret put AUTH_PASSWORD_HASH
+bunx wrangler secret put ZAI_BASE_URL         # 可选：不配置则 AI 功能按 §5/§11.7 降级
 bunx wrangler secret put ZAI_API_KEY
 # wrangler.jsonc vars 中改 NEXTAUTH_URL 为实际地址（如 https://forgotit.<account>.workers.dev）
 ```
+
+> `wrangler secret put` 每次执行都会自动创建新版本并即时生效，部署前后均可设置；
+> 值通过 stdin 传入（`echo -n "xxx" | wrangler secret put NAME`），不会留在 shell 历史。
 
 ### 11.4 构建与部署
 
@@ -550,13 +560,29 @@ cp .dev.vars.example .dev.vars                                    # 本地凭证
 GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 ```
 
-> 以下清单已于 2026-09-15 在沙箱 miniflare 全部实测通过（附录 A #17-#20）；真机部署时可复验：
+> 以下清单已于 2026-09-15 在沙箱 miniflare 全部实测通过（附录 A #17-#20）；真机部署时可复验；
+> 线上部署后把 localhost:8787 换成 workers.dev 地址重跑同一份清单即可（附录 #21 已验证）：
 
 - [x] 未登录 `curl -i localhost:8787/api/stats` → 401；访问 `/` → 307 跳登录
 - [x] 登录后 `/api/stats` 返回 JSON；创建笔记 → 200（D1 写入）
 - [x] 上传图片 → `GET /uploads/<文件名>` → 200 且 md5 与源文件一致（R2 写读往返）
 - [x] `GET /api/sync/pull?since=0` → cursor JSON
-- [x] 配置 `ZAI_*` 后语义搜索返回结果（含 AI 查询扩展）
+- [x] 配置 `ZAI_*` 后语义搜索返回结果（含 AI 查询扩展；端点不可达时见 §11.7 降级）
+
+**冒烟脚本五个坑（全部实战踩过）**：
+
+1. **上传接口是 JSON 不是 multipart**：`POST /api/ai/attachments` 接收
+   `{"mimeType":"image/png","dataUrl":"data:image/png;base64,..."}`；
+   用 `-F file=@xx.png` 会得到 500（服务端把 multipart 边界串当 JSON 解析报错）。
+2. **NextAuth 登录无论成败都返回 302**：不能拿状态码判断成功，要用登录后的
+   `GET /api/stats` 是否 200 来验证会话（需先 `GET /api/auth/csrf` 拿 token + cookie jar）。
+3. **服务与测试要同脚本执行**：先起 `wrangler dev` 再另开终端 curl 的写法在 CI/沙箱里
+   会因后台进程被回收而全军覆没（HTTP 000）；应 `wrangler dev ... & sleep 15; curl ...; kill %1`
+   写在同一脚本里。
+4. **`.dev.vars` 的 NEXTAUTH_URL 必须与 dev 端口一致**（默认 `http://localhost:8787`），
+   改了端口忘了改它 → 登录永远失败。
+5. **部署后立即冒烟可能打到旧版本**（边缘传播竞态，实测出现过）：等几秒重试，或先
+   `bunx wrangler deployments list` 确认 Current Version 再测。
 
 ### 11.6 已知边界与排障
 
@@ -564,10 +590,18 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | --- | --- | --- |
 | Prisma 报 `could not locate the Query Engine` | 用了 Node 客户端（无 wasm 变体） | 走 `bun run build:cf` 全链路（会自动生成 workerd 客户端），勿单独手工 generate |
 | `WebAssembly.compile(): code generation disallowed` | workerd 禁止运行时 wasm 编译 | 确认用的是新生成器（`runtime = "workerd"`，`?module` 静态导入），不要回退 FORCE_WASM/readFileSync 方案 |
-| `next build` / OpenNext 打包被 OOM kill（137） | ① Next 16 已移除 `turbopack.memoryLimit`（写了被静默忽略），默认驱逐策略内存峰值高；② OpenNext esbuild（Go）打包 35MB 级 worker 峰值也高 | 双保险已内置：`experimental.turbopackMemoryEviction: "full"`（治 Turbopack，已在 next.config.ts）+ 构建前 `export GOGC=30 GOMEMLIMIT=1200MiB`（治 esbuild）。实测 4GB cgroup 通过（附录 #18）；≥8GB 机器无需任何额外配置 |
-| D1 交互式事务报错 | D1 适配器仅支持批事务 | 本项目唯一事务是数组批形式（`embedding.ts`），天然兼容；新增代码请勿用回调式事务 |
+| `next build` / OpenNext 打包被 OOM kill（137） | ① Next 16 已移除 `turbopack.memoryLimit`（写了被静默忽略），默认驱逐策略内存峰值高；② OpenNext esbuild（Go）打包 35MB 级 worker 峰值也高；③ 同机 dev server 常驻占 ~300MB 就足以压垮峰值（实战教训：cf15-17 连续被杀全是它在场） | 三保险已内置：`experimental.turbopackMemoryEviction: "full"` + `experimental.cpus: 1`（均在 next.config.ts）+ 构建前 `export GOGC=30 GOMEMLIMIT=1200MiB`（治 esbuild）。实测 4GB cgroup 通过（附录 #18）；≥8GB 机器无需任何额外配置；4GB 机器构建前停掉 dev server（§11.0 第 2 条） |
+| D1 交互式事务报错 | D1 适配器仅支持批事务（运行时日志有 `prisma:warn Cloudflare D1 does not support transactions` 提示，属预期） | 本项目唯一事务是数组批形式（`embedding.ts`），天然兼容；新增代码请勿用回调式事务 |
 | 上传图片 413 | Workers 请求体上限 100MB | 远大于应用自身 8MB 限制，一般不会触发 |
-| 部署报 Worker 超过 64MiB（code 10027） | `find_additional_modules: true` 会把 trace 误收的 node_modules（含 workerd 二进制）全部上传 | 关闭该配置（新生成器无需 fs 模块），见 §11.0 第 1 条 |
+| 部署报 Worker 超过 64MiB（code 10027） | `find_additional_modules: true` 会把 trace 误收的 node_modules（含 149MB workerd 二进制、@next 等共 1.3GB）全部上传 | 关闭该配置（新生成器无需 fs 模块），见 §11.0 第 1 条；实测关闭后上传体积降至 ~35MB |
+| R2 读图 503 `Storage Unavailable` | workerd 的 `ReadableStream` **没有 `.arrayBuffer()` 方法**（Node 有）——Node 下跑得好好的代码上 workerd 就抛 TypeError | 已修（`src/lib/storage/r2.ts` 用 `new Response(stream).arrayBuffer()` 包装，两端通用）；自行改动读取逻辑时注意同坑 |
+| 部署后行为像旧版本（刚修的 bug 复现/新端点 404） | 边缘版本传播竞态：请求落到还没切换的旧版本上 | 等几秒重试；`bunx wrangler deployments list` 确认 Current Version 与最新一次一致 |
+| next.config 校验警告 `Unrecognized key(s) ... 'memoryLimit' at "turbopack"` 或 "must also declare turbopack" | Next 16 规则：① `turbopack.memoryLimit` 已移除（写了被静默忽略，是 OOM 排障最大误导）；② 有 webpack 配置块时必须同时声明 turbopack 块 | 用仓库现成 `next.config.ts`（已处理两处）；内存治理用 `experimental.turbopackMemoryEviction: "full"` |
+| 创建笔记后立即语义搜索为空 | 索引是异步构建的（`indexNoteAsync` fire-and-forget），刚写完可能还没建好 | 稍候重试，或 `POST /api/ai/reindex` 主动重建；批量导入后建议统一 reindex |
+
+**生产排障利器**：`bunx wrangler tail forgotit --format pretty`——实时看线上日志/未捕获
+异常/慢请求（本次实战全靠它定位 AI 端点 403 与降级路径）。不需要 Preview URLs 时在
+wrangler.jsonc 显式设 `"preview_urls": false` 可消除部署警告。
 
 ### 11.7 Workers 部署的 AI 能力边界（重要）
 
@@ -579,6 +613,9 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 
 设计依据：`reindexAllNotes` 对 AI 关键词逐条 try/catch（`keywordsFailed` 计数，不阻塞向量索引）；
 语义搜索的 AI 扩展失败自动回退原始查询词。行为在真实 Workers 上验证过（附录 #21）。
+
+另注意：**语义索引与笔记写入是异步解耦的**——创建后立即搜索可能为空（见 §11.6 末行），
+与 AI 可用性无关，Node 部署同理。
 
 ---
 
@@ -607,5 +644,6 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | 19 | Workers 端到端冒烟（§11.5 全清单）：登录 → D1 读写 → R2 上传回读（md5 一致）→ reindex（indexed:1）→ 语义搜索命中 → sync/pull 游标 | ✅ 2026-09-15 全部通过 |
 | 20 | workerd 坑：R2 读取 `ReadableStream.arrayBuffer()` 不存在（Node 有）→ 读图 503 | ✅ 已修：`new Response(stream).arrayBuffer()` 两端通用，md5 一致 |
 | 21 | **真实 Cloudflare 部署**（API token 实战）：D1/R2 创建 → 远程建表 → 部署 → secrets ×5 → 线上全链冒烟（登录/D1 读写/R2 md5/语义搜索含换措辞命中/关键词搜索/sync 游标）；踩坑：64MiB 限制（关 find_additional_modules 解决）、内网 AI 端点不可达（403/1002，降级方案见 §11.7）、构建与 dev server 内存冲突 | ✅ 2026-09-15 线上验证通过：`https://forgotit.mewlxyy666.workers.dev` |
+| 22 | 坑位文档化复查：§11.2-11.6 全部坑点与本次实战一一对应（token 最小权限/JSON 上传格式/302 判定/同脚本冒烟/NEXTAUTH_URL 端口/版本传播竞态/arrayBuffer/64MiB/OOM 三件套/异步索引），排障表从 6 行扩到 10 行 | ✅ 2026-09-15 复查入档 |
 
 实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-d1 6.19.3 / wrangler 4.x / Debian（openssl 3.0.x）
