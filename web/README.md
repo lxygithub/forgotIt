@@ -73,7 +73,7 @@ src/
 │   ├── sync-store.ts        客户端同步引擎：outbox、游标、30s 轮询、online 事件
 │   ├── local-first.ts       本地优先写入层（离线降级）
 │   ├── note-repo.ts         DTO 序列化 / 固定类目 / 类型推断
-│   └── db.ts                Prisma Client 单例
+│   └── db.ts                Prisma Client（Workers 下每请求一个实例，见部署文档 §11.8）
 scripts/
 └── hash-password.ts         生成 scrypt 密码哈希 CLI（写入 .env 的 AUTH_PASSWORD_HASH）
 ```

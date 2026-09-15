@@ -118,7 +118,7 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 
 - **框架**：Next.js 16（App Router）+ React 19 + TypeScript
 - **UI**：Tailwind CSS 4 + shadcn/ui + Lucide 图标 + framer-motion
-- **数据**：Prisma ORM + SQLite（单文件，`db/custom.db`）；生产可平滑迁移 PostgreSQL + pgvector；**双部署支持**（Node 走文件库，Cloudflare Workers 走 D1）
+- **数据**：Prisma ORM。**双部署支持**：Node 部署走 SQLite 单文件（`db/custom.db`）；Cloudflare Workers 部署走**自建 PostgreSQL**（经 Hyperdrive + Workers VPC 连接，2026-09-15 由 D1 迁入，详见《forgotIt部署文档.md》§11.8）
 - **状态**：Zustand（同步引擎 / 本地覆盖层）+ localStorage（outbox、游标、设备 ID）
 - **AI**：内置平台中立 fetch 层（环境变量优先 → `.z-ai-config` 文件兑底），Prompt 规范对齐开发文档第 16 节
 
@@ -127,7 +127,8 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 - [x] Web 原型 v1.0：笔记 / AI 整理 / RAG 问答 / 标签 / 回收站 / 主题
 - [x] Web 原型 v1.1：语义向量搜索（RRF 混合检索）+ 多设备同步（LWW + 冲突快照）
 - [x] Web 原型 v1.2：单用户鉴权（NextAuth 密码门禁）+ README 与部署文档
-- [x] Web 原型 v1.3：双部署支持（同一代码库 Node + Cloudflare Workers/D1/R2，环境变量切换；Next 升级 16.3.5，AI 层平台中立化）
+- [x] Web 原型 v1.3：双部署支持（同一代码库 Node + Cloudflare Workers，环境变量切换；Next 升级 16.3.5，AI 层平台中立化）
+- [x] 数据自主：Workers 侧数据库由 Cloudflare D1 迁往**自建 PostgreSQL**（Hyperdrive + Workers VPC，2026-09-15 上线验证通过）
 - [x] 原生移动端开发文档 v1.0（Android/iOS=Flutter，鸿蒙=ArkTS，含 API 契约/同步协议/一致性基准，供本机 AI 执行）
 - [ ] Flutter App（Android + iOS，flutter_gemma 端侧推理，见开发文档 §15 与原生移动端开发文档 §8）
 - [ ] 鸿蒙 App（HarmonyOS NEXT 原生 ArkTS，见原生移动端开发文档 §9）

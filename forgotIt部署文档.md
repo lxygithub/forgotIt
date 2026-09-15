@@ -498,33 +498,40 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 | | Node（§4） | Workers（本节） |
 | --- | --- | --- |
 | 构建产物 | `.next/standalone` | OpenNext Worker（`.open-next/`） |
-| 数据库 | SQLite 文件（`DATABASE_URL`） | Cloudflare D1（同一份 SQLite 方言 schema） |
+| 数据库 | SQLite 文件（`DATABASE_URL`） | **自建 PostgreSQL**（经 Hyperdrive + Workers VPC，见 §11.8）|
 | 图片存储 | 磁盘 `public/uploads` | R2（存储适配层，读写同路径 `/uploads/…`） |
 | AI 凭证 | `.z-ai-config` 文件（§5） | 环境变量 `ZAI_BASE_URL`/`ZAI_API_KEY`（可选 `ZAI_TOKEN`） |
-| 切换变量 | 无需设置（默认即 Node） | `DB_DRIVER=d1`、`STORAGE_DRIVER=r2`（wrangler vars） |
+| 切换变量 | 无需设置（默认即 Node） | `DB_DRIVER=pg`、`STORAGE_DRIVER=r2`（wrangler vars） |
 | 接入层 | 可再加 CF 橙云 / Tunnel | 直连边缘 |
 
+> **数据库已于 2026-09-15 由 D1 迁往自建 PostgreSQL**，详见 **§11.8**（含架构图、
+> Hyperdrive/VPC/Tunnel 资源 ID、迁移脚本、回滚与排障）。`d1_databases` 绑定仍保留，
+> 作为随时可切回的回滚路径。
+
 关键实现（理解后再排障）：`src/lib/db.ts` 按 `DB_DRIVER` 选择驱动——Node 走默认 Prisma
-客户端，Workers 走新生成器产出的 workerd 客户端（wasm 引擎以
-`import('./query_engine_bg.wasm?module')` 静态导入，wrangler 自动编译注册）+
-`@prisma/adapter-d1`。图片经 `src/lib/storage/` 抽象（local / r2 两实现），
-Workers 上由 `/uploads/[...key]` 路由从 R2 流式读取，鉴权门禁（`/uploads/*`）两端一致。
+客户端（直连 `DATABASE_URL`），Workers 走新生成器产出的 workerd 客户端 + `@prisma/adapter-pg`，
+经 Hyperdrive 连接家里的 PostgreSQL；**每个请求新建一个客户端**（Workers 禁止跨请求复用
+I/O 对象），对外仍导出 `db`（Proxy 延迟解析），调用点无需感知。图片经 `src/lib/storage/`
+抽象（local / r2 两实现），Workers 上由 `/uploads/[...key]` 路由从 R2 流式读取，
+鉴权门禁（`/uploads/*`）两端一致。
 
 ### 11.2 一次性准备
 
+> ⚠️ **数据库已于 2026-09-15 迁往自建 PostgreSQL**（见 §11.8）。下面标 **【回滚用】**
+> 的命令仅在需要切回 D1 或重建 D1 备份时才执行；新环境的数据库准备走 §11.8。
+
 ```bash
 cd web && bun install                       # wrangler 已在 devDependencies
-bunx wrangler login                         # 或用 API Token：export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx（CI/无人值守推荐，本次实战即此方式）
-bunx wrangler d1 create forgotit            # → 把输出的 database_id 填进 web/wrangler.jsonc
+bunx wrangler login                         # 或用 API Token：export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx（CI/无人值守推荐）
 bunx wrangler r2 bucket create forgotit-uploads
-bun run d1:schema                           # prisma migrate diff 生成 d1/schema.sql
-bunx wrangler d1 execute forgotit --remote --file d1/schema.sql -y   # -y 跳过交互确认（CI/脚本环境必需）
+# —— 以下两行【回滚用】：数据库已迁 PG，仅切回 D1 时需要 ——
+bunx wrangler d1 create forgotit            # → 把输出的 database_id 填进 web/wrangler.jsonc
+bun run pg:schema                           # 注意：脚本已由 d1:schema 更名，现在生成 prisma/pg/schema.sql
 ```
 
-> **Token 最小权限（实战验证）**：`Workers Scripts : Edit` + `D1 : Edit` +
-> `Workers R2 Storage : Edit` 三项即可完成本节全部操作与部署；缺 `User Details : Read`
-> 只会让 `wrangler whoami` 少显示邮箱，不影响任何操作。建议用 Custom Token 而非 Global Key；
-> token 一旦泄露（如误发到聊天/提交入库）应立即在 dashboard 撤销。
+> **Token 最小权限**：迁移后除了原有的 `Workers Scripts : Edit` + `Workers R2 Storage : Edit`，
+> 还需要 **`Connectivity Directory : Edit`**（创建 VPC Service）与 **`Workers Hyperdrive : Edit`**。
+> 建议用 Custom Token 而非 Global Key；token 一旦泄露应立即在 dashboard 撤销。
 
 ### 11.3 Secrets 与 vars
 
@@ -648,6 +655,127 @@ wrangler.jsonc 显式设 `"preview_urls": false` 可消除部署警告。
 另注意：**语义索引与笔记写入是异步解耦的**——创建后立即搜索可能为空（见 §11.6 末行），
 与 AI 可用性无关，Node 部署同理。
 
+### 11.8 数据库迁移：D1 → 自建 PostgreSQL（2026-09-15）
+
+> 把线上数据库从 Cloudflare D1 换成自建 PostgreSQL。应用仍部署在 Workers，
+> 但数据落回自有服务器。本节记录架构、改动、迁移步骤、回滚与排障。
+
+#### 为什么是 PostgreSQL 而不是 MySQL
+
+项目 ORM 是 Prisma。Prisma **目前不支持**从 Workers 访问传统 MySQL，官方文档原文：
+
+> work being done ... will enable access to **traditional MySQL databases from Cloudflare
+> Workers and Pages in the future**
+
+Workers 可用的只有 D1 / PostgreSQL / PlanetScale / Neon 的驱动适配器（PlanetScale 走自家
+HTTP 驱动，接不了 Hyperdrive）。换成 PostgreSQL 后 **67 处查询代码一行未改** —— Prisma
+Client API 与方言无关，只需改 datasource provider 与 driver adapter。
+
+#### 迁移后的架构
+
+```
+Worker → Hyperdrive → VPC Service → Cloudflare Tunnel → 本机 PostgreSQL
+```
+
+关键资源（账号 `d16192780cbd7ffa633f1e699a83dee8`）：
+
+| 资源 | 值 |
+| --- | --- |
+| Hyperdrive 配置 | `dbfd6840d76244dbb5419726644a01a4`（**`caching: disabled`**）|
+| VPC Service | `01a0a580-2df7-7910-8c4e-a7c23143473c`（tcp / postgresql / 5432 / `127.0.0.1`）|
+| Tunnel | `6dd02198-072f-41be-a67e-be9eb387ceb2` |
+| PostgreSQL 容器 | `forgotit-postgres`（postgres:17-alpine，宿主 `127.0.0.1:5432`，`unless-stopped`）|
+| 数据落盘 | `/mnt/datadisk/yuan/postgres/forgotit/data` |
+| 编排文件 | `/mnt/datadisk/yuan/postgres/forgotit/docker-compose.yml` |
+
+**Hyperdrive 必须禁用缓存**（`--caching-disabled`）：它只缓存读查询且写后不失效，而本项目
+的 LWW 冲突解决要**先读 `updatedAt` 再决定谁赢**，缓存会让它用陈旧时间戳判胜负——
+这是静默的数据正确性问题，不是性能取舍。
+
+PostgreSQL 侧两个要点：
+- **必须启用 TLS**：Hyperdrive 强制加密，而 PG 默认 `ssl=off`。自签证书即可
+  （Hyperdrive 不校验源站证书）；私钥须归 postgres 用户（alpine 镜像 UID=70）且权限 600，
+  否则 PG 拒绝启动。
+- 容器只绑 `127.0.0.1`，公网不可达，流量全部经隧道。
+
+#### 代码改动
+
+| 文件 | 改动 |
+| --- | --- |
+| `prisma/schema.prisma` | `provider` 改 `postgresql`；新增 `SyncCounter`；`SyncLog.seq` 去掉自增 |
+| `src/lib/db.ts` | 改用 `@prisma/adapter-pg` + `pg`；**每请求一个客户端**（见下）|
+| `src/lib/cf.ts` | 移除 D1 相关，仅保留 R2 |
+| `wrangler.jsonc` | 新增 `hyperdrive` 绑定；`DB_DRIVER` 由 `d1` 改 `pg`；`d1_databases` 保留作回滚 |
+| `package.json` | 新增 `pg@^8.23.0` / `@prisma/adapter-pg`；`d1:schema` → `pg:schema` |
+
+**为什么必须「每请求一个客户端」**：Cloudflare Workers 禁止跨请求复用 I/O 对象，
+沿用模块级 Prisma 单例会抛 `Cannot perform I/O on behalf of a different request`。
+现在 `db.ts` 以请求 `ctx` 为键缓存客户端；对外仍导出 `db`（Proxy 延迟解析），
+**因此 16 个文件的 69 处调用点一行未改**。
+
+`scripts/gen-workers-schema.mjs` **无需改动**：它只替换 `generator` 块、datasource 原样透传，
+主 schema 改成 postgresql 后派生的 workers schema 自动跟着对。
+
+#### 迁移后一并修复的三类问题
+
+这三个都是**迁到 PG 才会静默出错**的点：
+
+1. **搜索大小写**：SQLite 的 `LIKE` 对 ASCII 不区分大小写，PG 的区分。11 处 `contains`
+   加 `mode: 'insensitive'`（生成 `ILIKE`），否则搜 `api` 命中不了 `API`。
+2. **同步漏事件**：PG 序列分配不参与事务——事务 A 取 seq=5、B 取 seq=6，若 B 先提交，
+   pull 端会把游标推过 5，A 提交后 seq=5 永不下发。改为 `SyncCounter` 单行表**在写事务内**
+   分配（`UPDATE` 持行锁到提交，保证「分配序 == 提交序」）。
+3. **远程查询性能**：关键词检索由 13 次串行改并行；`sync/push` 按笔记分组并发（组内串行，
+   保证同笔记的 LWW 时序）；标签计数下推数据库（原先全表拉进 JS）。
+
+顺带修复：彻底删除时墓碑/流水/实体删除纳入同一事务（原先 `.catch(() => undefined)`
+吞错且三者非原子）。
+
+#### 数据迁移步骤
+
+```bash
+# 1) 从 D1 导出各表为 JSON
+mkdir -p /tmp/d1-export
+for t in Note Tag NoteTag Attachment Embedding SyncLog ConflictSnapshot Tombstone; do
+  npx wrangler d1 execute forgotit --remote --json --config web/wrangler.jsonc \
+    --command "SELECT * FROM \"$t\"" > /tmp/d1-export/$t.json
+done
+
+# 2) 建表（Prisma 生成 PG DDL）+ 导入
+bun run pg:schema
+docker exec -i forgotit-postgres psql -U forgotit -d forgotit -v ON_ERROR_STOP=1 \
+  < prisma/pg/schema.sql
+
+PG_URL="postgres://forgotit:<密码>@127.0.0.1:5432/forgotit" \
+  bun run migrate:d1-to-pg        # 脚本可重复执行：开头按依赖倒序 TRUNCATE
+```
+
+两个必须注意的转换：
+- **boolean**：SQLite 存 `0/1`，PG 的 `boolean` 不接受整数，需显式转换；
+- **时间戳精度**：必须落在 `timestamp(3)`，**毫秒不能丢** —— LWW 冲突解决依赖毫秒比较。
+
+迁移完成后记得把 `SyncCounter` 对齐现有最大 seq（脚本已自动处理）。
+
+#### 回滚
+
+```bash
+# 1) wrangler.jsonc：vars.DB_DRIVER 改回 "d1"
+# 2) src/lib/db.ts 还原 D1 分支（git 历史中有）
+# 3) bun run deploy:cf
+```
+
+`d1_databases` 绑定与 D1 数据均保留，随时可切回。注意切回会丢失切换期间写入 PG 的增量。
+
+#### 排障
+
+| 现象 | 原因 / 解法 |
+| --- | --- |
+| `proxy request failed, cannot connect to the specified address` | 上游 `opennextjs-cloudflare#1322`：`pg-cloudflare` 被 esbuild 解析到空实现（`dist/empty.js`）。**本项目实测未复现**；若出现，在 `next.config.ts` 加 `outputFileTracingIncludes` 补 `pg-cloudflare/dist/**` + `esm/**` |
+| `Cannot perform I/O on behalf of a different request` | 跨请求复用了连接池。检查 `db.ts` 是否每请求新建客户端 |
+| Hyperdrive 创建时报连接失败 | 依次排查：PG 是否 `ssl=on`、隧道连接器是否在线、VPC Service 端口是否 5432、`pg_hba` 是否允许 |
+| 英文关键词搜不到 | `contains` 是否带 `mode: 'insensitive'` |
+| 同步丢失变更 | 看 `SyncLog.seq` 是否仍为数据库自增（应为应用分配），以及写入是否在同一事务内 |
+
 ---
 
 ## 附录 A：本文档验证记录
@@ -677,5 +805,6 @@ wrangler.jsonc 显式设 `"preview_urls": false` 可消除部署警告。
 | 21 | **真实 Cloudflare 部署**（API token 实战）：D1/R2 创建 → 远程建表 → 部署 → secrets ×5 → 线上全链冒烟（登录/D1 读写/R2 md5/语义搜索含换措辞命中/关键词搜索/sync 游标）；踩坑：64MiB 限制（关 find_additional_modules 解决）、内网 AI 端点不可达（403/1002，降级方案见 §11.7）、构建与 dev server 内存冲突 | ✅ 2026-09-15 线上验证通过：`https://forgotit.mewlxyy666.workers.dev` |
 | 22 | 坑位文档化复查：§11.2-11.6 全部坑点与本次实战一一对应（token 最小权限/JSON 上传格式/302 判定/同脚本冒烟/NEXTAUTH_URL 端口/版本传播竞态/arrayBuffer/64MiB/OOM 三件套/异步索引），排障表从 6 行扩到 10 行 | ✅ 2026-09-15 复查入档 |
 | 23 | Workers Builds（Git 自动构建）三字段配置（§11.4 末小节）：根目录 `web` + 无 bun 等价构建链 + `opennextjs-cloudflare deploy`；据用户 CI 实测报错 `Could not detect a directory containing static files` 诊断给出（根目录未设 `web`） | ⏳ 配置已入档，待用户在 CI 复验构建通过后回填 ✅ |
+| 24 | **数据库迁移 D1 → 自建 PostgreSQL**（§11.8）：本机 PG 容器（TLS 自签，私钥须归 UID 70）→ VPC Service → Hyperdrive（**禁用缓存**）→ 数据迁移 5 行（毫秒精度保留）→ Prisma 换 `adapter-pg` + 每请求客户端（69 处调用点零改动）→ 修复大小写/同步漏事件/远程查询三类问题 | ✅ 2026-09-15 线上通过：Prisma 读回真实数据、搜索大小写三种写法均命中、SyncCounter 原子递增、路由 307/200/401 正常、`tsc --noEmit` 全通过。上游 `opennextjs-cloudflare#1322`（pg-cloudflare 被 esbuild 解析到空实现）**未复现**。踩坑：npm 镜像缺 `@aws-sdk/middleware-flexible-checksums@3.974.55`（手工补包）、wrangler 非交互环境不接受 OAuth（需 `wrangler login` 或 API Token）、deploy 需 `.env` 提供 `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` |
 
-实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-d1 6.19.3 / wrangler 4.x / Debian（openssl 3.0.x）
+实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-pg 6.19.3 / pg 8.23.0 / PostgreSQL 17.11 / wrangler 4.x / Debian（openssl 3.0.x）
