@@ -19,6 +19,8 @@ const nextConfig: NextConfig = {
   // 避免默认 'auto' 下 RSS 超限被 OOM kill（Next 16 已移除 turbopack.memoryLimit 配置项）
   experimental: {
     turbopackMemoryEviction: "full",
+    // 单进程构建：4GB cgroup 下多 worker 并发是 OOM 主因之一（变慢换稳定）
+    cpus: 1,
   },
   /* config options here */
   typescript: {

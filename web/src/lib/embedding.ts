@@ -224,20 +224,28 @@ export async function reindexAllNotes(): Promise<{ indexed: number; keywordsGene
     select: { id: true, title: true, content: true, summary: true, semanticKeywords: true },
   });
   let keywordsGenerated = 0;
+  let keywordsFailed = 0;
   for (const note of notes) {
     if (!parseJsonArray(note.semanticKeywords).length) {
-      const kws = await aiSemanticKeywords(note.title, note.summary, note.content);
-      if (kws.length > 0) {
-        await db.note.update({
-          where: { id: note.id },
-          data: { semanticKeywords: JSON.stringify(kws) },
-        });
-        keywordsGenerated++;
+      try {
+        const kws = await aiSemanticKeywords(note.title, note.summary, note.content);
+        if (kws.length > 0) {
+          await db.note.update({
+            where: { id: note.id },
+            data: { semanticKeywords: JSON.stringify(kws) },
+          });
+          keywordsGenerated++;
+        }
+      } catch (err) {
+        // AI 不可用时降级（如 Workers 部署无公网可达的 AI 端点）：
+        // 跳过该条关键词，不阻塞本地 hash-ngram 向量索引（后者不依赖 AI）
+        console.error('[reindexAllNotes] AI keywords failed, skip note', note.id, err);
+        keywordsFailed++;
       }
     }
     await indexNote(note.id);
   }
-  return { indexed: notes.length, keywordsGenerated };
+  return { indexed: notes.length, keywordsGenerated, keywordsFailed };
 }
 
 /** 查询向量 vs 全库向量的余弦相似检索（生产替换为 pgvector HNSW top-k） */

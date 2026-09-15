@@ -474,9 +474,24 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 
 > **v1.3 起同一代码库同时支持两种部署方式**，环境变量切换，Node 部署（§3/§4）完全不受影响。
 >
-> **验证状态（实测记录见附录 A #13-#20）**：Node 路径全量回归通过；Workers 路径已在本地
-> workerd（miniflare）完成端到端冒烟——门禁 / scrypt 登录 / D1 读写 / R2 上传回读（md5 一致）/
-> AI 语义搜索 / sync 同步游标全部通过（2026-09-15）。上生产前仍建议按 §11.5 在真实账号复验。
+> **验证状态（实测记录见附录 A #13-#21）**：Node 路径全量回归通过；Workers 路径已在本地
+> workerd（miniflare）完成端到端冒烟，并已部署到真实 Cloudflare Workers（D1/R2 真实资源）
+> 完成线上验证：门禁 / scrypt 登录 / D1 读写 / R2 上传回读（md5 一致）/ 语义搜索 / sync 游标
+> 全部通过（2026-09-15）。AI 增强能力在线上有限制，见 §11.7。
+
+### 11.0 生产部署快速记录（2026-09-15 实战）
+
+实际部署时在 §11.2-11.4 之外补充的实战要点：
+
+1. **Worker 体积限制**：默认构建会把被 trace 误收的 node_modules（含 149MB workerd 二进制）
+   一起上传，超 64MiB 上限（code 10027）。解法：`find_additional_modules` 保持关闭
+   （新生成器的 prisma wasm 走 `?module` 静态导入已进 bundle，无需 fs 模块）。
+2. **构建与 dev server 不能共存**（4GB 机器）：`next dev` 常驻占 ~300MB，正好压垮构建峰值。
+   构建前停掉 dev server，构建后再启动。
+3. **secrets 配置时机**：`wrangler secret put` 会自动创建新版本并即时生效，部署前后均可。
+4. **AI 凭证的网络限制**：沙箱内置凭证指向内网专用端点（`internal-api.z.ai` → RFC1918
+   私网 IP），Cloudflare Workers 边缘拒代私网地址（HTTP 403 + error code 1002），
+   **公网/Workers 根本不可达**。影响与解法见 §11.7。
 
 ### 11.1 双端架构差异
 
@@ -552,6 +567,18 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | `next build` / OpenNext 打包被 OOM kill（137） | ① Next 16 已移除 `turbopack.memoryLimit`（写了被静默忽略），默认驱逐策略内存峰值高；② OpenNext esbuild（Go）打包 35MB 级 worker 峰值也高 | 双保险已内置：`experimental.turbopackMemoryEviction: "full"`（治 Turbopack，已在 next.config.ts）+ 构建前 `export GOGC=30 GOMEMLIMIT=1200MiB`（治 esbuild）。实测 4GB cgroup 通过（附录 #18）；≥8GB 机器无需任何额外配置 |
 | D1 交互式事务报错 | D1 适配器仅支持批事务 | 本项目唯一事务是数组批形式（`embedding.ts`），天然兼容；新增代码请勿用回调式事务 |
 | 上传图片 413 | Workers 请求体上限 100MB | 远大于应用自身 8MB 限制，一般不会触发 |
+| 部署报 Worker 超过 64MiB（code 10027） | `find_additional_modules: true` 会把 trace 误收的 node_modules（含 workerd 二进制）全部上传 | 关闭该配置（新生成器无需 fs 模块），见 §11.0 第 1 条 |
+
+### 11.7 Workers 部署的 AI 能力边界（重要）
+
+| 能力 | Workers 部署状态 | 说明 |
+| --- | --- | --- |
+| 关键词搜索 / 本地向量语义搜索 / CRUD / 同步 / 图片上传预览 | ✅ 完全可用 | hash-ngram 嵌入是纯算法，不依赖 AI 端点 |
+| AI 查询扩展 / AI 整理 / RAG 问答 / 图片理解（VLM） | ⚠️ 优雅降级 | 请求 AI 时报错并回退（搜索回退原始词、整理提示失败），不影响其他功能 |
+| 恢复满血 AI | 更换公网可达的 AI 端点 | `bunx wrangler secret put ZAI_BASE_URL`（及 ZAI_API_KEY/ZAI_TOKEN）指向公网 API（如智谱开放平台 `https://open.bigmodel.cn/api/paas/v4` 或 `https://api.z.ai/api/paas/v4`，需相应平台的 API Key）后即时生效 |
+
+设计依据：`reindexAllNotes` 对 AI 关键词逐条 try/catch（`keywordsFailed` 计数，不阻塞向量索引）；
+语义搜索的 AI 扩展失败自动回退原始查询词。行为在真实 Workers 上验证过（附录 #21）。
 
 ---
 
@@ -579,5 +606,6 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | 18 | Turbopack 通道构建（`bun run build:cf` 默认路径） | ✅ 2026-09-15：4GB cgroup 通过。配方 = `turbopackMemoryEviction:"full"` + `NODE_OPTIONS=--max-old-space-size=1024` + `GOGC=30 GOMEMLIMIT=1200MiB`（前两条已在 next.config/文档，Go 变量仅低内存机器需要） |
 | 19 | Workers 端到端冒烟（§11.5 全清单）：登录 → D1 读写 → R2 上传回读（md5 一致）→ reindex（indexed:1）→ 语义搜索命中 → sync/pull 游标 | ✅ 2026-09-15 全部通过 |
 | 20 | workerd 坑：R2 读取 `ReadableStream.arrayBuffer()` 不存在（Node 有）→ 读图 503 | ✅ 已修：`new Response(stream).arrayBuffer()` 两端通用，md5 一致 |
+| 21 | **真实 Cloudflare 部署**（API token 实战）：D1/R2 创建 → 远程建表 → 部署 → secrets ×5 → 线上全链冒烟（登录/D1 读写/R2 md5/语义搜索含换措辞命中/关键词搜索/sync 游标）；踩坑：64MiB 限制（关 find_additional_modules 解决）、内网 AI 端点不可达（403/1002，降级方案见 §11.7）、构建与 dev server 内存冲突 | ✅ 2026-09-15 线上验证通过：`https://forgotit.mewlxyy666.workers.dev` |
 
 实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-d1 6.19.3 / wrangler 4.x / Debian（openssl 3.0.x）

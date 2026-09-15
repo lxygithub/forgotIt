@@ -10,7 +10,9 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   // 把 bundle 目录内全部文件（含 Prisma wasm）上传为可通过 node:fs 读取的模块
-  "find_additional_modules": true,
+  // find_additional_modules 已关闭：新生成器的 prisma wasm 走 ?module 静态导入（已打进 bundle），
+  // 无需把整个 bundle 目录（含被 trace 误收的 1.3GB node_modules）上传为 fs 模块，且可避开 64MiB 限制
+  // "find_additional_modules": true,
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -20,7 +22,7 @@
       "binding": "DB",
       "database_name": "forgotit",
       // ⚠️ 占位符：替换为 `wrangler d1 create forgotit` 输出的真实 database_id
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "a34b542f-dbbb-4111-b5e9-38a26890660d"
     }
   ],
   "r2_buckets": [
@@ -34,7 +36,7 @@
     "DB_DRIVER": "d1",
     "STORAGE_DRIVER": "r2",
     // ⚠️ 替换为你的实际访问地址（如 https://forgotit.<account>.workers.dev 或自定义域）
-    "NEXTAUTH_URL": "https://forgotit.example.workers.dev",
+    "NEXTAUTH_URL": "https://forgotit.mewlxyy666.workers.dev",
     "AUTH_USERNAME": "owner"
   },
   "observability": {

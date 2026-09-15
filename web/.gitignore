@@ -32,3 +32,6 @@ public/uploads/
 
 # Workers 专用 Prisma 客户端（bun run build:cf 自动生成）
 src/generated/
+
+# Cloudflare 部署凭证（gitignored，勿入库）
+.cf-*
