@@ -541,6 +541,11 @@ bunx wrangler secret put ZAI_API_KEY
 > `wrangler secret put` 每次执行都会自动创建新版本并即时生效，部署前后均可设置；
 > 值通过 stdin 传入（`echo -n "xxx" | wrangler secret put NAME`），不会留在 shell 历史。
 
+> **改密码不需要重新构建**：登录密码是 Worker 的运行时 secret，与 Git 提交、构建、部署完全无关。两种改法任选其一：
+> ① 命令行（`web/` 目录下）：`echo -n "新密码" | bunx wrangler secret put AUTH_PASSWORD`（当时 put 的是哪个名字就改哪个，实战用的明文 `AUTH_PASSWORD`；哈希方式则先 `bun run hash-password <新密码>` 再 put `AUTH_PASSWORD_HASH`）；
+> ② Dashboard → Workers & Pages → `forgotit` → Settings → **Variables and Secrets** → 编辑 `AUTH_PASSWORD`。
+> 下一次请求即生效。⚠️ 别改错地方：Workers Builds（Git 集成）的 Build variables 只作用于**构建进程**，改它不会影响线上登录密码，也没有必要因此触发重新部署。
+
 ### 11.4 构建与部署
 
 ```bash
@@ -551,6 +556,31 @@ bun run deploy:cf
 
 - 每次改过 `prisma/schema.prisma` 后重新 `deploy:cf` 即可（workers 客户端自动重新生成）；
 - 本地先看效果：`bun run preview:cf`。
+
+#### Git 自动构建（Workers Builds，push 即部署）
+
+本仓库是 monorepo：Next.js 应用在 `web/` 子目录，`wrangler.jsonc` 也在 `web/` 里。
+在 Dashboard → Workers & Pages → `forgotit` → Settings → Build（Git 集成）里必须按下表填写，
+**不设根目录必失败**（实战报错：`✘ [ERROR] Could not detect a directory containing static files`
+——wrangler 在仓库根找不到 `wrangler.jsonc`，回退成"静态站点探测"后报错）：
+
+| 字段 | 填写值 |
+| --- | --- |
+| Root directory（根目录） | `web` |
+| Build command（构建命令） | `node scripts/gen-workers-schema.mjs && npx prisma generate --schema prisma/schema.workers.prisma && npx opennextjs-cloudflare build` |
+| Deploy command（部署命令） | `npx opennextjs-cloudflare deploy` |
+
+- Build command 是 `bun run build:cf` 的无 bun 等价链（CI 镜像不保证有 bun；`gen-workers-schema.mjs`
+  只用 `node:fs`，node 可直接跑）。三步缺一不可：派生 workers schema → 生成 workerd 客户端 →
+  OpenNext 构建；少任何一步都会在运行时或部署时炸（见 §11.6 前两行）。
+- Deploy command **不要用 Workers Builds 默认的 `npx wrangler deploy`**：它会因 `.open-next/`
+  未构建而报 entry-point not found 或走到上面的静态探测报错；`opennextjs-cloudflare deploy`
+  会先校验产物再调 wrangler，报错可读。
+- Build variables 建议加 `NODE_VERSION=22`（Next 16 要求 Node ≥ 20.9）。
+- CF 构建机内存比 4GB 沙箱宽裕，一般无需 §11.0 第 2 条的低内存配方；
+  `turbopackMemoryEviction: "full"` 已固化在 next.config.ts，真 OOM 再回头查。
+- Workers Builds 的 Build variables/Secrets **只影响构建期**；运行时的 secrets
+  （密码、NEXTAUTH_SECRET、ZAI_*）在 Worker 的 Settings → Variables and Secrets 里管，二者别混。
 
 ### 11.5 本机验证清单（上线前必过）
 
@@ -598,6 +628,7 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | 部署后行为像旧版本（刚修的 bug 复现/新端点 404） | 边缘版本传播竞态：请求落到还没切换的旧版本上 | 等几秒重试；`bunx wrangler deployments list` 确认 Current Version 与最新一次一致 |
 | next.config 校验警告 `Unrecognized key(s) ... 'memoryLimit' at "turbopack"` 或 "must also declare turbopack" | Next 16 规则：① `turbopack.memoryLimit` 已移除（写了被静默忽略，是 OOM 排障最大误导）；② 有 webpack 配置块时必须同时声明 turbopack 块 | 用仓库现成 `next.config.ts`（已处理两处）；内存治理用 `experimental.turbopackMemoryEviction: "full"` |
 | 创建笔记后立即语义搜索为空 | 索引是异步构建的（`indexNoteAsync` fire-and-forget），刚写完可能还没建好 | 稍候重试，或 `POST /api/ai/reindex` 主动重建；批量导入后建议统一 reindex |
+| Workers Builds 报 `Could not detect a directory containing static files` | Git 集成构建的根目录停在仓库根，`wrangler.jsonc` 在 `web/` 子目录里——wrangler 找不到 Worker 配置就回退成静态站点探测，然后探测失败 | 根目录填 `web`；Build/Deploy command 按 §11.4「Git 自动构建」小节填（先 `opennextjs-cloudflare build` 产出 `.open-next/`，再 deploy） |
 
 **生产排障利器**：`bunx wrangler tail forgotit --format pretty`——实时看线上日志/未捕获
 异常/慢请求（本次实战全靠它定位 AI 端点 403 与降级路径）。不需要 Preview URLs 时在
@@ -645,5 +676,6 @@ wrangler.jsonc 显式设 `"preview_urls": false` 可消除部署警告。
 | 20 | workerd 坑：R2 读取 `ReadableStream.arrayBuffer()` 不存在（Node 有）→ 读图 503 | ✅ 已修：`new Response(stream).arrayBuffer()` 两端通用，md5 一致 |
 | 21 | **真实 Cloudflare 部署**（API token 实战）：D1/R2 创建 → 远程建表 → 部署 → secrets ×5 → 线上全链冒烟（登录/D1 读写/R2 md5/语义搜索含换措辞命中/关键词搜索/sync 游标）；踩坑：64MiB 限制（关 find_additional_modules 解决）、内网 AI 端点不可达（403/1002，降级方案见 §11.7）、构建与 dev server 内存冲突 | ✅ 2026-09-15 线上验证通过：`https://forgotit.mewlxyy666.workers.dev` |
 | 22 | 坑位文档化复查：§11.2-11.6 全部坑点与本次实战一一对应（token 最小权限/JSON 上传格式/302 判定/同脚本冒烟/NEXTAUTH_URL 端口/版本传播竞态/arrayBuffer/64MiB/OOM 三件套/异步索引），排障表从 6 行扩到 10 行 | ✅ 2026-09-15 复查入档 |
+| 23 | Workers Builds（Git 自动构建）三字段配置（§11.4 末小节）：根目录 `web` + 无 bun 等价构建链 + `opennextjs-cloudflare deploy`；据用户 CI 实测报错 `Could not detect a directory containing static files` 诊断给出（根目录未设 `web`） | ⏳ 配置已入档，待用户在 CI 复验构建通过后回填 ✅ |
 
 实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-d1 6.19.3 / wrangler 4.x / Debian（openssl 3.0.x）
