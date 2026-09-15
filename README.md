@@ -9,7 +9,7 @@
 随手一记，AI 帮你归类、打标、写摘要；
 哪天想不起来了，用大白话问一句，它替你把记忆找回来。
 
-[开发文档](./forgotIt开发文档.md) · [部署文档](./forgotIt部署文档.md) · [Web 端开发指南](./web/README.md)
+[开发文档](./forgotIt开发文档.md) · [原生移动端开发文档](./forgotIt原生移动端开发文档.md) · [部署文档](./forgotIt部署文档.md) · [Web 端开发指南](./web/README.md)
 
 </div>
 
@@ -127,7 +127,9 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 - [x] Web 原型 v1.0：笔记 / AI 整理 / RAG 问答 / 标签 / 回收站 / 主题
 - [x] Web 原型 v1.1：语义向量搜索（RRF 混合检索）+ 多设备同步（LWW + 冲突快照）
 - [x] Web 原型 v1.2：单用户鉴权（NextAuth 密码门禁）+ README 与部署文档
-- [ ] Flutter App（flutter_gemma 端侧推理，见开发文档 §15）
+- [x] 原生移动端开发文档 v1.0（Android/iOS=Flutter，鸿蒙=ArkTS，含 API 契约/同步协议/一致性基准，供本机 AI 执行）
+- [ ] Flutter App（Android + iOS，flutter_gemma 端侧推理，见开发文档 §15 与原生移动端开发文档 §8）
+- [ ] 鸿蒙 App（HarmonyOS NEXT 原生 ArkTS，见原生移动端开发文档 §9）
 - [ ] 生产级检索：PostgreSQL + pgvector + 真实 Embedding 模型（`gemma-embedding-768`）
 - [ ] 附件 / OCR 文本入向量索引（`attachments.description/ocrText` 已预留）
 - [ ] 远期：CRDT 合并策略（开发文档 §11 D6 备选）
@@ -137,5 +139,6 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 | 文档 | 内容 |
 | --- | --- |
 | [forgotIt开发文档.md](./forgotIt开发文档.md) | 完整产品与技术方案 v2.0：决策日志 D1-D9、模型选型、数据模型、同步/RAG 设计、Prompt 规范、测试与合规 |
+| [forgotIt原生移动端开发文档.md](./forgotIt原生移动端开发文档.md) | Android/iOS（Flutter）与鸿蒙（ArkTS）原生客户端开发文档：服务端对接契约（NextAuth 登录流）、LWW 同步协议精确规范、三端一致的端侧检索算法与对拍基准、页面规格、安全合规、里程碑 M0-M4/H1-H2 |
 | [forgotIt部署文档.md](./forgotIt部署文档.md) | 环境要求、本地/生产部署（systemd / PM2 / Docker）、AI 凭证配置、数据库运维、常见问题（含实测坑点） |
 | [web/README.md](./web/README.md) | Web 端目录结构、开发命令、API 一览（含鉴权）、语义检索 / 同步 / 鉴权实现说明 |
