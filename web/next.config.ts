@@ -14,7 +14,12 @@ const nextConfig: NextConfig = {
     return config;
   },
   // Next 16.3 要求 Turbopack 构建在存在 webpack 配置时必须同时声明 turbopack 配置
-  turbopack: { memoryLimit: '1500MB' },
+  turbopack: {},
+  // 低内存环境（4GB cgroup）必需：'full' 强制 Turbopack 激进驱逐编译缓存，
+  // 避免默认 'auto' 下 RSS 超限被 OOM kill（Next 16 已移除 turbopack.memoryLimit 配置项）
+  experimental: {
+    turbopackMemoryEviction: "full",
+  },
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,

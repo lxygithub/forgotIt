@@ -474,11 +474,9 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 
 > **v1.3 起同一代码库同时支持两种部署方式**，环境变量切换，Node 部署（§3/§4）完全不受影响。
 >
-> **诚实声明（实测验证状态见附录 A #13-#18）**：Node 路径全量回归通过；Workers 路径已完成
-> OpenNext 构建与冒烟（门禁 / NextAuth 登录 / AI 环境变量凭证 / D1·R2 binding 全部通过），
-> D1 查询链路的最后一环（wasm 引擎加载）已按官方 workerd 通道就位，但本沙箱
-> （2 核 / 4GB，miniflare 本地 fs 映射与生产 workerd 存在差异）**未能完成端到端验证**——
-> 请按 §11.5 在你本机验证后再正式上线；期间 §4 的 Node 路线随时可用作回退。
+> **验证状态（实测记录见附录 A #13-#20）**：Node 路径全量回归通过；Workers 路径已在本地
+> workerd（miniflare）完成端到端冒烟——门禁 / scrypt 登录 / D1 读写 / R2 上传回读（md5 一致）/
+> AI 语义搜索 / sync 同步游标全部通过（2026-09-15）。上生产前仍建议按 §11.5 在真实账号复验。
 
 ### 11.1 双端架构差异
 
@@ -534,14 +532,16 @@ bun run deploy:cf
 ```bash
 bunx wrangler d1 execute forgotit --local --file d1/schema.sql   # 本地 D1 建表
 cp .dev.vars.example .dev.vars                                    # 本地凭证（已 gitignore）
-bun run build:cf && bunx wrangler dev --port 8787
+GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 ```
 
-- [ ] 未登录 `curl -i localhost:8787/api/stats` → 401；访问 `/` → 307 跳登录
-- [ ] 登录后 `/api/stats` 返回 JSON；创建笔记 → 200（D1 写入）
-- [ ] 上传图片 → `GET /uploads/<文件名>` → 200（R2 写读往返）
-- [ ] `GET /api/sync/pull?since=0` → cursor JSON
-- [ ] 配置 `ZAI_*` 后语义搜索返回结果
+> 以下清单已于 2026-09-15 在沙箱 miniflare 全部实测通过（附录 A #17-#20）；真机部署时可复验：
+
+- [x] 未登录 `curl -i localhost:8787/api/stats` → 401；访问 `/` → 307 跳登录
+- [x] 登录后 `/api/stats` 返回 JSON；创建笔记 → 200（D1 写入）
+- [x] 上传图片 → `GET /uploads/<文件名>` → 200 且 md5 与源文件一致（R2 写读往返）
+- [x] `GET /api/sync/pull?since=0` → cursor JSON
+- [x] 配置 `ZAI_*` 后语义搜索返回结果（含 AI 查询扩展）
 
 ### 11.6 已知边界与排障
 
@@ -549,7 +549,7 @@ bun run build:cf && bunx wrangler dev --port 8787
 | --- | --- | --- |
 | Prisma 报 `could not locate the Query Engine` | 用了 Node 客户端（无 wasm 变体） | 走 `bun run build:cf` 全链路（会自动生成 workerd 客户端），勿单独手工 generate |
 | `WebAssembly.compile(): code generation disallowed` | workerd 禁止运行时 wasm 编译 | 确认用的是新生成器（`runtime = "workerd"`，`?module` 静态导入），不要回退 FORCE_WASM/readFileSync 方案 |
-| `next build` 被 Killed | Turbopack 内存需求高（2 核 / 4GB 小内存机器实测会被杀） | webpack 备选通道：`bunx next build --webpack && bunx opennextjs-cloudflare build --skipNextBuild`（`asyncWebAssembly` 已在 next.config 开启；产物需把 `.next/server/chunks/static/wasm/*.wasm` 拷到 `.open-next/server-functions/default/static/wasm/`） |
+| `next build` / OpenNext 打包被 OOM kill（137） | ① Next 16 已移除 `turbopack.memoryLimit`（写了被静默忽略），默认驱逐策略内存峰值高；② OpenNext esbuild（Go）打包 35MB 级 worker 峰值也高 | 双保险已内置：`experimental.turbopackMemoryEviction: "full"`（治 Turbopack，已在 next.config.ts）+ 构建前 `export GOGC=30 GOMEMLIMIT=1200MiB`（治 esbuild）。实测 4GB cgroup 通过（附录 #18）；≥8GB 机器无需任何额外配置 |
 | D1 交互式事务报错 | D1 适配器仅支持批事务 | 本项目唯一事务是数组批形式（`embedding.ts`），天然兼容；新增代码请勿用回调式事务 |
 | 上传图片 413 | Workers 请求体上限 100MB | 远大于应用自身 8MB 限制，一般不会触发 |
 
@@ -575,7 +575,9 @@ bun run build:cf && bunx wrangler dev --port 8787
 | 14 | sharp 移除 + `images.unoptimized`（图片链路双端一致化），上传与图片回读回归 | ✅ 通过 |
 | 15 | OpenNext 构建（webpack 通道：`next build --webpack` + `opennextjs-cloudflare build --skipNextBuild`，含 workers 客户端与 wasm） | ✅ 通过 |
 | 16 | Workers（miniflare 本地）冒烟：门禁 401/307、NextAuth scrypt 登录、AI 环境变量凭证、D1/R2 binding 注入、`find_additional_modules` | ✅ 通过 |
-| 17 | Workers D1 查询端到端（wasm 引擎在 workerd 加载） | ⏳ 沙箱受限未完成（2 核被守护进程杀 + miniflare `/bundle` fs 映射与生产 workerd 有差异），架构已按官方通道就位，待 §11.5 真机验证 |
-| 18 | Turbopack 通道构建（`bun run build:cf` 默认路径） | ⏳ 2 核 / 4GB 沙箱被杀（137）；正常内存机器应可完成，不行则用 #15 的 webpack 备选通道 |
+| 17 | Workers D1 查询端到端（wasm 引擎在 workerd 加载） | ✅ 2026-09-15：新生成器（`runtime="workerd"`，wasm 以 `?module` 静态导入）+ adapter-d1，D1 读（stats）/ 写（建笔记）在 miniflare 全通 |
+| 18 | Turbopack 通道构建（`bun run build:cf` 默认路径） | ✅ 2026-09-15：4GB cgroup 通过。配方 = `turbopackMemoryEviction:"full"` + `NODE_OPTIONS=--max-old-space-size=1024` + `GOGC=30 GOMEMLIMIT=1200MiB`（前两条已在 next.config/文档，Go 变量仅低内存机器需要） |
+| 19 | Workers 端到端冒烟（§11.5 全清单）：登录 → D1 读写 → R2 上传回读（md5 一致）→ reindex（indexed:1）→ 语义搜索命中 → sync/pull 游标 | ✅ 2026-09-15 全部通过 |
+| 20 | workerd 坑：R2 读取 `ReadableStream.arrayBuffer()` 不存在（Node 有）→ 读图 503 | ✅ 已修：`new Response(stream).arrayBuffer()` 两端通用，md5 一致 |
 
 实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-d1 6.19.3 / wrangler 4.x / Debian（openssl 3.0.x）

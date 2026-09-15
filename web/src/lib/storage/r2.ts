@@ -25,7 +25,8 @@ export const r2Storage: StorageAdapter = {
     if (!key) return null;
     const object = await getR2Bucket().get(key);
     if (!object) return null;
-    const buffer = await object.body.arrayBuffer();
+    // workerd 的 ReadableStream 没有 .arrayBuffer()（Node 有）——用 Response 包装后读取，两端通用
+    const buffer = await new Response(object.body as unknown as BodyInit).arrayBuffer();
     return {
       data: new Uint8Array(buffer),
       mime: object.httpMetadata?.contentType || guessMime(publicPath),

@@ -22,8 +22,9 @@ export async function GET(
         'Cache-Control': 'private, max-age=86400',
       },
     });
-  } catch {
-    // 存储不可用（如 Workers 上 R2 binding 缺失）
+  } catch (err) {
+    // 存储不可用（如 Workers 上 R2 binding 缺失）；记录原因便于排障
+    console.error('[GET /uploads]', err);
     return new NextResponse('Storage Unavailable', { status: 503 });
   }
 }
