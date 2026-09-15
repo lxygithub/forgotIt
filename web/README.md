@@ -1,6 +1,6 @@
 # 记不住 · Web 端（ForgotIt Web）
 
-「记不住（ForgotIt）」的 Web 原型 v1.1——本地优先 AI 记事本。
+「记不住（ForgotIt）」的 Web 原型 v1.2——本地优先 AI 记事本。
 
 - 产品与架构设计：[根目录 · 开发文档 v2.0](../forgotIt开发文档.md)
 - 部署与运维：[根目录 · 部署文档](../forgotIt部署文档.md)
@@ -12,6 +12,7 @@
 | 框架 | Next.js 16（App Router）+ React 19 + TypeScript |
 | UI | Tailwind CSS 4 + shadcn/ui + Lucide + framer-motion + sonner |
 | 数据 | Prisma ORM + SQLite（单文件） |
+| 鉴权 | NextAuth v4（Credentials 单用户 + JWT 会话 + proxy 全站门禁） |
 | 客户端状态 | Zustand（同步引擎）+ localStorage（outbox / 游标 / 设备 ID） |
 | AI | z-ai-web-dev-sdk（仅服务端），模拟文档规划的端侧推理 |
 
@@ -35,6 +36,7 @@ bun run dev        # http://localhost:3000
 | `bun run db:push` | schema 变更推送到 SQLite |
 | `bun run db:generate` | 重新生成 Prisma Client |
 | `bun run db:reset` | 清空并重建数据库 |
+| `bun run hash-password` | 生成 scrypt 密码哈希（配 `AUTH_PASSWORD_HASH`，用法 `bun run hash-password <密码>`） |
 
 ## 目录结构
 
@@ -43,11 +45,13 @@ src/
 ├── app/
 │   ├── layout.tsx           根布局（zh-CN、主题、viewport、Toaster）
 │   ├── page.tsx             单页主入口（视图切换 + 全局状态 + FAB）
+│   ├── login/page.tsx       登录门禁（品牌风格，方案 A 单用户鉴权）
 │   ├── globals.css          暖纸/暖褐双主题（oklch）、细滚动条
-│   └── api/                 17 个路由文件（见下表）
+│   └── api/                 18 个路由文件（见下表）
+├── proxy.ts                 全站门禁（未登录：API 401 / 页面 302 登录；覆盖 /uploads/*）
 ├── components/
 │   ├── forgotit/            13 个业务组件
-│   │   ├── app-header/footer  顶栏（导航/主题/同步图标）/ 置底页脚
+│   │   ├── app-header/footer  顶栏（导航/主题/同步/登出）/ 置底页脚
 │   │   ├── notes-view        笔记列表（搜索/筛选/网格/空状态）
 │   │   ├── note-card         笔记卡（摘要/标签胶囊/待同步角标/操作）
 │   │   ├── note-editor       编辑器（源码-预览/附件/仅本地/AI 整理）
@@ -57,22 +61,33 @@ src/
 │   │   ├── sync-panel        同步面板（设备/离线开关/冲突处置/重建索引）
 │   │   ├── empty-state/markdown/theme-*
 │   └── ui/                  shadcn/ui 组件
-└── lib/
-    ├── api.ts               前端 API 客户端（类型 + 统一错误处理 + AbortSignal）
-    ├── brand.ts             品牌文案常量（对齐开发文档 §13）
-    ├── ai.ts                AI 能力层：打标/摘要/RAG/看图/查询扩展（§16 Prompt 规范）
-    ├── embedding.ts         语义索引：分块/向量/余弦/重建
-    ├── search.ts            关键词 + 语义双路 → RRF(k=60) 合并
-    ├── sync-server.ts       服务端同步：LWW、冲突快照、SyncLog 流水
-    ├── sync-store.ts        客户端同步引擎：outbox、游标、30s 轮询、online 事件
-    ├── local-first.ts       本地优先写入层（离线降级）
-    ├── note-repo.ts         DTO 序列化 / 固定类目 / 类型推断
-    └── db.ts                Prisma Client 单例
+├── lib/
+│   ├── api.ts               前端 API 客户端（类型 + 统一错误处理 + AbortSignal）
+│   ├── brand.ts             品牌文案常量（对齐开发文档 §13）
+│   ├── auth.ts              NextAuth 配置（Credentials 单用户 + JWT 30 天）
+│   ├── password.ts          scrypt 哈希/校验（timingSafeEqual 恒定时间比较）
+│   ├── ai.ts                AI 能力层：打标/摘要/RAG/看图/查询扩展（§16 Prompt 规范）
+│   ├── embedding.ts         语义索引：分块/向量/余弦/重建
+│   ├── search.ts            关键词 + 语义双路 → RRF(k=60) 合并
+│   ├── sync-server.ts       服务端同步：LWW、冲突快照、SyncLog 流水
+│   ├── sync-store.ts        客户端同步引擎：outbox、游标、30s 轮询、online 事件
+│   ├── local-first.ts       本地优先写入层（离线降级）
+│   ├── note-repo.ts         DTO 序列化 / 固定类目 / 类型推断
+│   └── db.ts                Prisma Client 单例
+scripts/
+└── hash-password.ts         生成 scrypt 密码哈希 CLI（写入 .env 的 AUTH_PASSWORD_HASH）
 ```
 
 ## API 一览
 
 统一约定：错误返回 `{ "error": "..." }` + 对应 4xx/5xx；列表/详情返回 DTO（见 `src/lib/api.ts`）。
+未登录访问除 `/api/auth/*` 外的一切 API 均由门禁返回 401（见下方「单用户鉴权」）。
+
+### 鉴权（NextAuth，v1.2）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/POST | `/api/auth/*` | NextAuth 托管：csrf、signin/signout、callback、session（唯一免门禁前缀） |
 
 ### 笔记
 
@@ -149,6 +164,17 @@ src/
 - 服务端 LWW：`updatedAt` 新者胜；落败方完整内容写入 `ConflictSnapshot`，
   用户可在同步面板对比后恢复任一版本；
 - `localOnly` 笔记在入队前即被过滤，永不出本地。
+
+### 单用户鉴权（`src/proxy.ts` + `lib/auth.ts` + `lib/password.ts`，v1.2）
+
+- 方案 A：Credentials 单用户登录 + JWT 会话（30 天免登录），登录页为品牌化门禁；
+- `src/proxy.ts`（Next 16 proxy 约定）统一拦截：未登录 → 页面 302 `/login`、
+  `/api/*` 401 JSON、用户上传图片 `/uploads/*` 同样拦截；品牌静态资源放行；
+- 密码双模式：`AUTH_PASSWORD`（明文，开发用）与 `AUTH_PASSWORD_HASH`（scrypt +
+  timingSafeEqual，生产推荐），`bun run hash-password` 生成；
+- **fail closed**：漏配用户名或密码时拒绝一切登录；
+- 单用户模型下同步 `deviceId` 不关联 userId（所有设备同属店主）；多用户化时
+  在 `authOptions.providers` 追加 Provider、`deviceId` 升级为 `userId:deviceId` 即可。
 
 ### 面向生产的替换路径（与开发文档对齐）
 

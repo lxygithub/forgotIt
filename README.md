@@ -23,7 +23,7 @@
 - **找的时候零门槛**：不用回忆当时用了什么词，用大白话问——「找一下能报销的票」「最近身体有什么要注意的」——混合检索会把语义相关的都捞出来；
 - **数据零焦虑**：单机可用、离线可用，隐私笔记（仅本地）永不上传，回收站 30 天反悔期。
 
-## 功能特性（Web 原型 v1.1）
+## 功能特性（Web 原型 v1.2）
 
 | 能力 | 说明 |
 | --- | --- |
@@ -33,6 +33,7 @@
 | 🖼️ 图片理解 | 上传图片，VLM 自动生成描述（发票、报告、截图都能被搜到） |
 | 🔍 三路搜索 | 关键词 / 语义向量 / 混合检索（双路 RRF k=60 合并），语义检索带查询扩展 |
 | 🔄 多设备同步 | 本地优先 + outbox 离线暂存，联网自动推送；LWW 冲突合并 + 冲突快照可回滚 |
+| 🔐 单用户鉴权 | NextAuth 密码门禁：未登录一切页面 / API / 上传图片均拒绝，支持 scrypt 哈希口令 |
 | 🔒 仅本地隐私 | `local_only` 笔记不入同步队列、永不出本地 |
 | 🗑️ 回收站 | 软删除保留 30 天，显示剩余天数，可恢复 |
 | 🌗 深色模式 | 暖纸底 / 暖褐底双主题，琥珀主色 |
@@ -48,7 +49,7 @@
 └──────────────┬──────────────────▲──────────────────┘
                │ push(upsert/删除) │ pull?since=seq
 ┌──────────────▼──────────────────┴──────────────────┐
-│           Web 服务（Next.js 16 App Router）          │
+│           Web 服务（Next.js 16 App Router + NextAuth）           │
 │                                                    │
 │  笔记 CRUD · 混合标签 · 回收站 · 同步流水(SyncLog)     │
 │                                                    │
@@ -71,14 +72,16 @@ forgotIt/
 ├── README.md               ← 你在这里
 ├── forgotIt开发文档.md       产品 / 架构 / 数据模型 / Prompt / 工程规范（v2.0）
 ├── forgotIt部署文档.md       本地开发、生产部署、AI 配置、运维与排障
-└── web/                    Web 原型 v1.1（Next.js 16 + Prisma/SQLite）
+└── web/                    Web 原型 v1.2（Next.js 16 + Prisma/SQLite + NextAuth）
     ├── README.md           开发指南、API 一览、关键实现说明
     ├── prisma/schema.prisma
     ├── public/
+    ├── scripts/            hash-password 密码哈希 CLI
     └── src/
-        ├── app/            单页应用 + 17 个 API 路由
+        ├── app/            单页应用 + 登录页 + 18 个 API 路由
         ├── components/     13 个业务组件 + shadcn/ui
-        └── lib/            ai / embedding / search / sync / local-first
+        ├── proxy.ts        全站门禁（未登录：API 401 / 页面跳登录）
+        └── lib/            ai / embedding / search / sync / auth / local-first
 ```
 
 ## 快速开始
@@ -86,13 +89,13 @@ forgotIt/
 ```bash
 git clone https://github.com/lxygithub/forgotIt.git
 cd forgotIt/web
-cp .env.example .env        # SQLite 路径，默认 file:../db/custom.db
+cp .env.example .env        # 配 SQLite 路径与登录账号（AUTH_USERNAME / AUTH_PASSWORD）
 bun install                 # 或 npm install
 bun run db:push             # 初始化数据库（自动生成 Prisma Client）
-bun run dev                 # 打开 http://localhost:3000
+bun run dev                 # 打开 http://localhost:3000，用 .env 里的账号登录
 ```
 
-打开后首次是空状态，点击插画旁的「**载入示例**」即可灌入一组演示笔记（含发票图、体检报告、健身计划等），体验 AI 整理、语义搜索与问答。
+打开后首次会先见到登录门禁（「私有仓库，店主请出示钥匙」），用 `.env` 里的账号密码进入；首次是空状态，点击插画旁的「**载入示例**」即可灌入一组演示笔记（含发票图、体检报告、健身计划等），体验 AI 整理、语义搜索与问答。
 
 > ⚠️ 两个实测过的坑：① 若 shell 里已 `export DATABASE_URL=...`，它会**覆盖** `.env`；
 > ② 生产构建（standalone）下 SQLite 相对路径会解析失败，**必须用绝对路径**。
@@ -103,6 +106,9 @@ bun run dev                 # 打开 http://localhost:3000
 | 变量 | 必填 | 默认 / 示例 | 说明 |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | ✅ | `file:../db/custom.db`（开发） | SQLite 连接串；生产请用绝对路径如 `file:/var/lib/forgotit/custom.db` |
+| `NEXTAUTH_SECRET` | ✅ | `openssl rand -base64 32` | 登录会话签名密钥（生产修改后需重新 build） |
+| `AUTH_USERNAME` / `AUTH_PASSWORD(_HASH)` | ✅ | `owner` / 明文或 scrypt 哈希 | 单用户登录凭证；生产推荐哈希（`bun run hash-password` 生成） |
+| `NEXTAUTH_URL` | 生产 ✅ | `https://notes.example.com` | NextAuth 回调基准地址 |
 | `PORT` | — | `3000` | 生产 standalone 监听端口 |
 | `.z-ai-config` | AI 功能需要 | 见[部署文档 §5](./forgotIt部署文档.md#5-ai-能力配置) | Z.ai 凭证文件（`{"baseUrl": "...", "apiKey": "..."}`），放在项目目录 / `~` / `/etc` 任一处 |
 
@@ -120,7 +126,7 @@ bun run dev                 # 打开 http://localhost:3000
 
 - [x] Web 原型 v1.0：笔记 / AI 整理 / RAG 问答 / 标签 / 回收站 / 主题
 - [x] Web 原型 v1.1：语义向量搜索（RRF 混合检索）+ 多设备同步（LWW + 冲突快照）
-- [x] 部署文档与 README
+- [x] Web 原型 v1.2：单用户鉴权（NextAuth 密码门禁）+ README 与部署文档
 - [ ] Flutter App（flutter_gemma 端侧推理，见开发文档 §15）
 - [ ] 生产级检索：PostgreSQL + pgvector + 真实 Embedding 模型（`gemma-embedding-768`）
 - [ ] 附件 / OCR 文本入向量索引（`attachments.description/ocrText` 已预留）
@@ -132,4 +138,4 @@ bun run dev                 # 打开 http://localhost:3000
 | --- | --- |
 | [forgotIt开发文档.md](./forgotIt开发文档.md) | 完整产品与技术方案 v2.0：决策日志 D1-D9、模型选型、数据模型、同步/RAG 设计、Prompt 规范、测试与合规 |
 | [forgotIt部署文档.md](./forgotIt部署文档.md) | 环境要求、本地/生产部署（systemd / PM2 / Docker）、AI 凭证配置、数据库运维、常见问题（含实测坑点） |
-| [web/README.md](./web/README.md) | Web 端目录结构、开发命令、17 个 API 一览、语义检索与同步实现说明 |
+| [web/README.md](./web/README.md) | Web 端目录结构、开发命令、API 一览（含鉴权）、语义检索 / 同步 / 鉴权实现说明 |

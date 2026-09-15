@@ -31,4 +31,16 @@ export const BRAND = {
   conflictTitle: '冲突记录',
   conflictKeepMine: '用我的版本',
   conflictKeepServer: '用服务器版本',
+  // 鉴权（v1.2 新增）
+  loginWelcome: '私有仓库，仅服务店主一人。请出示钥匙。',
+  loginUserLabel: '店主名',
+  loginUserPlaceholder: 'owner',
+  loginPassLabel: '钥匙（密码）',
+  loginSubmit: '开门',
+  loginLoading: '正在开门…',
+  loginError: '钥匙不对。别急，想想再试。',
+  loginShowPass: '显示密码',
+  loginHidePass: '隐藏密码',
+  loginFoot: '你记不住的，它都记得住。',
+  logoutAria: '退出登录',
 } as const;

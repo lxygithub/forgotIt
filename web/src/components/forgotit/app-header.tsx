@@ -1,6 +1,7 @@
 'use client';
 
-import { Brain, CloudOff, Loader2, RefreshCw } from 'lucide-react';
+import { Brain, CloudOff, Loader2, LogOut, RefreshCw } from 'lucide-react';
+import { signOut } from 'next-auth/react';
 import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/forgotit/theme-toggle';
 import { BRAND } from '@/lib/brand';
@@ -113,6 +114,15 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
           >
             {BRAND.localModeBadgeShort}
           </Badge>
+          {/* 退出登录 */}
+          <button
+            type="button"
+            aria-label={BRAND.logoutAria}
+            onClick={() => void signOut({ callbackUrl: '/login' })}
+            className="inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9"
+          >
+            <LogOut className="size-[18px]" aria-hidden="true" />
+          </button>
           <ThemeToggle />
         </div>
       </div>

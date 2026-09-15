@@ -1,6 +1,6 @@
 # 记不住（ForgotIt）部署文档
 
-> 适用范围：`web/` 目录下的 Web 原型 v1.1（Next.js 16 + Prisma/SQLite）。
+> 适用范围：`web/` 目录下的 Web 原型 v1.2（Next.js 16 + Prisma/SQLite + NextAuth）。
 > 产品与架构设计见[开发文档](./forgotIt开发文档.md)，Web 端开发细节见 [web/README.md](./web/README.md)。
 >
 > **本文档中的所有步骤与坑点均在真实环境实测验证过**（见附录 A）。
@@ -15,9 +15,10 @@
 | **B. 自托管生产** | 部署到 VPS / 家庭服务器长期使用 | §4 + §5 + §9 |
 | **C. 内网多设备** | 几台设备（电脑 + 手机）同步一套脑子 | §4 + §8 |
 
-> ⚠️ **重要提示（请先读）**：Web 原型为**单用户模型，无登录鉴权**。
-> 面向公网部署前，请务必在反向代理层加访问控制（Basic Auth / IP 白名单 / mTLS），
-> 或仅部署在可信内网。鉴权（NextAuth）在路线图中，尚未实现。
+> **鉴权说明（v1.2 起内置）**：Web 端自带**单用户鉴权**（NextAuth 方案 A：用户名 + 密码，
+> JWT 会话 30 天；页面 / API / 上传图片统一门禁；未配置凭证时拒绝一切登录，详见 §4.7）。
+> 它解决的是「陌生人能否打开你的脑子」这一个问题，公网部署仍建议上 HTTPS；
+> 如需多用户 / 第三方登录，NextAuth 已预留扩展位（见 §4.7 末尾）。
 
 ---
 
@@ -38,7 +39,8 @@
 ```bash
 git clone https://github.com/lxygithub/forgotIt.git
 cd forgotIt/web
-cp .env.example .env          # 默认 DATABASE_URL=file:../db/custom.db（相对路径，仅开发可用）
+cp .env.example .env          # 含 DATABASE_URL 与登录账号（AUTH_USERNAME/AUTH_PASSWORD）
+#   编辑 .env：把 AUTH_PASSWORD 改成你自己的钥匙（≥ 8 位）
 bun install
 bun run db:push               # 建表 + 生成 Prisma Client（自动创建 db/custom.db）
 bun run dev                   # 开发服务器，端口 3000
@@ -46,9 +48,10 @@ bun run dev                   # 开发服务器，端口 3000
 
 启动后访问 `http://localhost:3000`：
 
-1. 空状态页点击「**载入示例**」→ 灌入 8 条演示笔记（含发票图、体检报告、健身计划），体验完整功能；
-2. 顶部「✦」图标进入问答，试试「我的体检结果有什么问题」；
-3. 搜索框切到「语义」模式，试试「最近身体有什么要注意的」。
+1. 首先见到登录门禁（「私有仓库，店主请出示钥匙」），输入 `.env` 里的店主名与密码进入；
+2. 空状态页点击「**载入示例**」→ 灌入 8 条演示笔记（含发票图、体检报告、健身计划），体验完整功能；
+3. 顶部「✦」图标进入问答，试试「我的体检结果有什么问题」；
+4. 搜索框切到「语义」模式，试试「最近身体有什么要注意的」。
 
 **常用开发命令**：
 
@@ -86,6 +89,12 @@ bun run build                         # next build + 复制 static/public 进 st
 mkdir -p /var/lib/forgotit            # 数据目录（SQLite 文件放这里）
 export DATABASE_URL="file:/var/lib/forgotit/custom.db"
 
+# —— 鉴权（v1.2 起必需，见 §4.7）——
+export NEXTAUTH_URL="https://notes.example.com"      # NextAuth 基准地址（生产必需）
+export NEXTAUTH_SECRET="$(openssl rand -base64 32)"  # 会话签名密钥（保存好，勿频繁更换）
+export AUTH_USERNAME="owner"
+export AUTH_PASSWORD_HASH="scrypt\$...\$..."          # 生成：bun run hash-password <你的密码>
+
 # 首次部署：初始化数据库表结构（--skip-generate：运行时 client 已内置于 standalone）
 DATABASE_URL="$DATABASE_URL" bunx prisma db push --skip-generate
 
@@ -117,6 +126,10 @@ curl "http://127.0.0.1:3000/api/sync/pull?since=0"   # → {"cursor":0,...}
 | 变量 | 必填 | 示例 | 说明 |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | ✅ | `file:/var/lib/forgotit/custom.db` | SQLite 连接串（生产用绝对路径，见 §4.2） |
+| `NEXTAUTH_URL` | 生产 ✅ | `https://notes.example.com` | NextAuth 基准地址，须与实际访问域名一致 |
+| `NEXTAUTH_SECRET` | ✅ | `openssl rand -base64 32` | 会话签名密钥；修改后需重新 build（见 §4.7） |
+| `AUTH_USERNAME` | ✅ | `owner` | 店主用户名 |
+| `AUTH_PASSWORD` / `AUTH_PASSWORD_HASH` | ✅ 二选一 | 明文 / `scrypt$…$…` | 登录密码；生产推荐哈希（`bun run hash-password` 生成） |
 | `PORT` | — | `3000` | standalone 监听端口（默认 3000） |
 | `HOSTNAME` | — | `0.0.0.0` | standalone 监听地址（默认 0.0.0.0） |
 | `NODE_ENV` | — | `production` | 建议显式设置 |
@@ -252,7 +265,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # 公网部署务必加访问控制（原型无登录鉴权！）
+        # 鉴权已内置（§4.7）；如需二层防护可再加反代 Basic Auth：
         # auth_basic "ForgotIt";
         # auth_basic_user_file /etc/nginx/.htpasswd;
         # allow 192.168.1.0/24;
@@ -273,6 +286,32 @@ notes.example.com {
     }
 }
 ```
+
+### 4.7 单用户鉴权配置（NextAuth，v1.2 起内置）
+
+Web 端采用 NextAuth **方案 A**：单用户 Credentials 登录 + JWT 会话（30 天免登录）。
+`src/proxy.ts` 统一门禁：未登录访问页面 → 302 `/login`；访问 `/api/*` → 401 JSON；
+用户上传的图片 `/uploads/*` 同样被拦截（品牌静态资源 `/images/`、`/logo.svg` 放行）。
+
+需要配置四件事（完整清单见 §4.3）：
+
+1. `NEXTAUTH_SECRET`：会话签名密钥，`openssl rand -base64 32` 生成；
+2. `AUTH_USERNAME`：店主用户名；
+3. 登录密码二选一：
+   - `AUTH_PASSWORD`（明文，仅推荐本地开发）；
+   - `AUTH_PASSWORD_HASH`（scrypt 哈希，生产推荐）：`bun run hash-password <你的密码>` 生成，整行写入 `.env` 或环境变量；
+4. 生产还需 `NEXTAUTH_URL`（如 `https://notes.example.com`），必须与实际访问域名一致。
+
+行为与注意事项：
+
+- **fail closed**：漏配 `AUTH_USERNAME` 或密码时，任何登录都会被拒绝（服务端日志输出警告）；
+- `NEXTAUTH_SECRET` / `AUTH_*` 修改后，生产建议重新 `bun run build` 并重启
+  （门禁层运行于 Edge 环境，部分变量在构建期内联）；
+- 唯一免门禁的 API 前缀是 `/api/auth/*`（NextAuth 自己的登录流程）；
+- 登录页为品牌化门禁（「私有仓库，店主请出示钥匙」），登出按钮在顶栏；
+- 单用户模型下所有设备同属店主一人，同步模块 `deviceId` 无需关联 userId；
+- **扩展多用户 / OAuth**（GitHub、Google 等）：在 `src/lib/auth.ts` 的 Provider 列表直接追加，
+  同步链路把 `deviceId` 升级为 `userId:deviceId` 即可，数据模型无需变更。
 
 ---
 
@@ -400,7 +439,7 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 
 ## 9. 安全加固清单
 
-- [ ] **访问控制**：原型无登录鉴权，公网部署必须在反代层加 Basic Auth / IP 白名单 / mTLS（§4.6）
+- [x] **单用户鉴权**：NextAuth 密码门禁已内置（§4.7），部署时务必改掉默认/示例密码并配置 `NEXTAUTH_SECRET`
 - [ ] HTTPS（Caddy 自动，或 certbot）
 - [ ] `.z-ai-config` 权限 600，不入 git、不进镜像（§5）
 - [ ] 数据目录最小权限：`chown -R forgotit:forgotit /var/lib/forgotit && chmod 700 /var/lib/forgotit`
@@ -424,6 +463,9 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 | Windows 下 `bun run build` 失败 | 构建脚本含 Unix `cp -r` | 使用 WSL |
 | 冲突提示频繁 | 双端编辑同一条笔记触发 LWW | 同步面板处置即可，内容不丢 |
 | 上传图片 413 | 反代请求体限制 | `client_max_body_size 20m` |
+| 输入什么都登不进去 | `.env` 漏配 `AUTH_USERNAME` 或密码（fail closed，日志有警告） | 补齐鉴权配置；生产改了变量记得重新 build + 重启（§4.7） |
+| 登录后刷新又跳回 /login | `NEXTAUTH_URL` 与实际访问域名不一致，或 cookie 未随请求带上 | 使 `NEXTAUTH_URL` 与域名一致；HTTPS 走反代透传 `X-Forwarded-Proto` |
+| 想修改登录密码 | — | `bun run hash-password <新密码>` → 写入 `AUTH_PASSWORD_HASH` → 重启（生产重新 build） |
 
 ---
 
@@ -440,5 +482,8 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 | 7 | `PORT` 环境变量改端口 | ✅ 3102 端口正常监听 |
 | 8 | AI 凭证从 `~/.z-ai-config` 读取（生产 cwd 在 standalone 内） | ✅ 语义查询扩展正常返回 |
 | 9 | 环境变量 `DATABASE_URL` 覆盖 `.env` 文件 | ✅ 复现（即坑 1） |
+| 10 | 方案 A 鉴权门禁：未登录访问 API / 上传图片 / 页面 | ✅ 401 JSON / 307 跳登录 / 302 跳登录 |
+| 11 | 登录全流程：错误密码提示、正确登录、会话读取、登出、登出后再访根路径 | ✅ curl + 浏览器全流程通过 |
+| 12 | 登录页视觉：移动端 390×844、深色模式、0 控制台错误 | ✅ 通过 |
 
-实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3 / Prisma 6.19.2 / Debian（openssl 3.0.x）
+实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3 / Prisma 6.19.2 / next-auth 4.24.13 / Debian（openssl 3.0.x）
