@@ -1,0 +1,76 @@
+// 记不住 (ForgotIt) — 本地优先 AI 记事本
+// Prisma schema 对应文档 v2.0 第 6.3 / 14.2 节数据模型（单用户本地版）
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 笔记
+model Note {
+  id        String       @id @default(cuid())
+  type      String       @default("text") // text | image | mixed
+  title     String?
+  content   String? // Markdown 正文；纯文本视为不含语法的 Markdown
+  summary   String? // AI 生成摘要（列表页展示）
+  localOnly Boolean      @default(false) // 隐私标记：不走云端、不同步
+  pinned    Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime? // 软删除（回收站，30 天）
+  version   Int          @default(1)
+  tags      NoteTag[]
+  attachments Attachment[]
+}
+
+// 标签（混合标签体系）
+model Tag {
+  id        String    @id @default(cuid())
+  name      String
+  kind      String // 'category'（固定类目树）| 'free'（AI/用户自由标签）
+  parentId  String?
+  color     String?
+  createdAt DateTime  @default(now())
+  notes     NoteTag[]
+
+  @@unique([name, kind])
+}
+
+// 笔记-标签关联
+model NoteTag {
+  noteId  String
+  tagId   String
+  source  String // 'ai' | 'user'
+  note    Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  tag     Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, tagId])
+}
+
+// 附件（图片等）
+model Attachment {
+  id          String   @id @default(cuid())
+  noteId      String? // 可空：支持先上传图片、后建笔记的流程
+  note        Note?    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  filePath    String // 静态资源路径 /uploads/xxx.png
+  thumbPath   String?
+  mimeType    String
+  size        Int      @default(0)
+  width       Int?
+  height      Int?
+  description String? // VLM 图像描述（跨模态检索用）
+  ocrText     String? // OCR 提取文本
+  createdAt   DateTime @default(now())
+}
+
+// 同步墓碑（本地原型占位，后端同步用）
+model Tombstone {
+  id         String   @id @default(cuid())
+  entityType String // note | tag | attachment
+  entityId   String
+  deletedAt  DateTime @default(now())
+}

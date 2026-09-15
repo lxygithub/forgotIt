@@ -1,0 +1,20 @@
+// 「记不住」品牌文案常量（必须原样使用，勿改动）
+export const BRAND = {
+  appName: '记不住',
+  slogan: '脑子寄存处',
+  tagline: '你记不住的，它都记得住。',
+  emptyTitle: '这里啥也没有。',
+  emptyDesc: '不过没关系，你记不住，它记得住。',
+  searchPlaceholder: '想找啥？尽管问，反正你也不记得。',
+  localModeBadge: '本地模式：脑子放自己家',
+  localModeBadgeShort: '本地模式',
+  organizeDoneToast: '已帮你归类。不用谢，反正你下次也找不到。',
+  organizeLoadingToast: '正在帮你归类…',
+  syncToast: '正在把脑子同步到其他设备……',
+  trashHint: '删掉的东西在脑子里还会留 30 天。',
+  noResultText: '没找到相关记录，反正你也不记得',
+  trashEmpty: '回收站空空如也，干干净净。',
+  editorLocalOnlyLabel: '仅本地（不上传不同步）',
+  uploadingImageText: '正在看图…',
+  exampleQuestions: ['帮我找关于发票的记录', '总结我的旅行笔记', '我记过哪些好看餐厅'],
+} as const;
