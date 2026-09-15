@@ -16,6 +16,9 @@ interface ZaiConfig {
   apiKey: string;
   // 与 SDK 0.0.18 配置字段对齐：存在时随请求头透传（沙箱实测服务端校验 X-Token）
   token?: string;
+  // 显式模型名。原 Z.ai 端点由服务端决定模型、不需要该字段（缺省即不传，保持原行为）；
+  // 换成 DeepSeek 等「要求必传 model」的 OpenAI 兼容端点时，用环境变量 ZAI_MODEL 指定。
+  model?: string;
   chatId?: string;
   userId?: string;
 }
@@ -42,6 +45,7 @@ async function resolveZaiConfig(): Promise<ZaiConfig | null> {
       baseUrl: envBase.replace(/\/+$/, ''),
       apiKey: envKey,
       token: process.env.ZAI_TOKEN?.trim() || undefined,
+      model: process.env.ZAI_MODEL?.trim() || undefined,
     };
     return cachedConfig;
   }
@@ -107,6 +111,9 @@ async function zaiChat(
     method: 'POST',
     headers,
     body: JSON.stringify({
+      // 仅当配置了模型名时才带上：原 Z.ai 端点不需要（服务端决定），
+      // DeepSeek 等端点则必传，缺失会报 "missing field `model`"。
+      ...(config.model ? { model: config.model } : {}),
       ...body,
       thinking: body.thinking ?? { type: 'disabled' },
     }),
