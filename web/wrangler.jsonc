@@ -17,11 +17,13 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // 2026-09 迁移后 D1 已不再是主存储。此绑定暂时保留，作为回滚路径
+  // （把 vars.DB_DRIVER 改回 "d1" 并还原 src/lib/db.ts 的 D1 分支即可切回）。
+  // 线上稳定后，可连同 @prisma/adapter-d1 依赖一并移除。
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "forgotit",
-      // ⚠️ 占位符：替换为 `wrangler d1 create forgotit` 输出的真实 database_id
       "database_id": "a34b542f-dbbb-4111-b5e9-38a26890660d"
     }
   ],
@@ -31,9 +33,18 @@
       "bucket_name": "forgotit-uploads"
     }
   ],
+  // 【探针专用】仅用于验证 OpenNext 打包下 pg+Hyperdrive 是否可用；
+  // 正式迁移时这里会取代 d1_databases
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "dbfd6840d76244dbb5419726644a01a4"
+    }
+  ],
   "vars": {
-    // 双部署开关：Workers 固定为 d1/r2（Node 部署不读这两个变量，保持缺省即可）
-    "DB_DRIVER": "d1",
+    // 2026-09：数据库已迁往自建 PostgreSQL（经 Hyperdrive），驱动开关由 d1 改为 pg。
+    // 回滚：把 DB_DRIVER 改回 "d1" 并还原 src/lib/db.ts 的 D1 分支即可（d1_databases 绑定仍保留）。
+    "DB_DRIVER": "pg",
     "STORAGE_DRIVER": "r2",
     // ⚠️ 替换为你的实际访问地址（如 https://forgotit.<account>.workers.dev 或自定义域）
     "NEXTAUTH_URL": "https://forgotit.mewlxyy666.workers.dev",

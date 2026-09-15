@@ -9,7 +9,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  // 2026-09 起从 SQLite(D1) 迁移到自建 PostgreSQL（经 Cloudflare Hyperdrive + Workers VPC 连接）
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -51,7 +52,11 @@ model Embedding {
 
 // 同步流水（文档 6.4 /sync/pull：按 seq 游标增量拉取）
 model SyncLog {
-  seq        Int      @id @default(autoincrement())
+  // seq 改由应用层分配（见 src/lib/sync-server.ts 的 logSyncInTx）。
+  // 原因：PostgreSQL 的序列分配不参与事务 —— 事务 A 取到 seq=5、事务 B 取到 seq=6，
+  // 若 B 先提交，pull 端读到 6 并把游标推过 5，A 提交后 seq=5 就永远不会被下发。
+  // 现在改为在写事务里 UPDATE SyncCounter 取号（行锁保证分配序 == 提交序）。
+  seq        Int      @id
   entityType String // note
   entityId   String
   op         String // upsert | delete
@@ -59,6 +64,14 @@ model SyncLog {
   createdAt  DateTime @default(now())
 
   @@index([entityId])
+}
+
+// 同步序号计数器（单行表，id 恒为 1）
+// 写入事务通过 UPDATE 这一行拿到行锁，从而把 seq 的分配串行化，
+// 使「谁先拿到号」与「谁先提交」保持一致。
+model SyncCounter {
+  id    Int @id
+  value Int @default(0)
 }
 
 // LWW 冲突快照（文档 6.5：落败方变更不丢弃，保留为版本快照供用户查看/恢复）

@@ -217,7 +217,11 @@ export function indexNoteAsync(noteId: string): void {
 }
 
 /** 全量重索引（文档：换 embedding 模型后后台增量重索引；含缺失 semanticKeywords 的笔记补跑 LLM） */
-export async function reindexAllNotes(): Promise<{ indexed: number; keywordsGenerated: number }> {
+export async function reindexAllNotes(): Promise<{
+  indexed: number;
+  keywordsGenerated: number;
+  keywordsFailed: number;
+}> {
   const { aiSemanticKeywords } = await import('@/lib/ai');
   const notes = await db.note.findMany({
     where: { deletedAt: null },
@@ -225,26 +229,36 @@ export async function reindexAllNotes(): Promise<{ indexed: number; keywordsGene
   });
   let keywordsGenerated = 0;
   let keywordsFailed = 0;
-  for (const note of notes) {
-    if (!parseJsonArray(note.semanticKeywords).length) {
-      try {
-        const kws = await aiSemanticKeywords(note.title, note.summary, note.content);
-        if (kws.length > 0) {
-          await db.note.update({
-            where: { id: note.id },
-            data: { semanticKeywords: JSON.stringify(kws) },
-          });
-          keywordsGenerated++;
+
+  // 分批并发。原先逐条 await：每条至少要发一次 AI HTTP（外部服务）+ 一次向量写入，
+  // 数据库搬到自建 PG 后每次往返都是隧道外的网络延迟，串行会把整轮重索引拖到超时。
+  // AI 端点是外部服务，并发度取小值即可显著改善，同时不给对方压力。
+  const CONCURRENCY = 4;
+  for (let i = 0; i < notes.length; i += CONCURRENCY) {
+    await Promise.all(
+      notes.slice(i, i + CONCURRENCY).map(async (note) => {
+        if (!parseJsonArray(note.semanticKeywords).length) {
+          try {
+            const kws = await aiSemanticKeywords(note.title, note.summary, note.content);
+            if (kws.length > 0) {
+              await db.note.update({
+                where: { id: note.id },
+                data: { semanticKeywords: JSON.stringify(kws) },
+              });
+              keywordsGenerated++;
+            }
+          } catch (err) {
+            // AI 不可用时降级（如 Workers 部署无公网可达的 AI 端点）：
+            // 跳过该条关键词，不阻塞本地 hash-ngram 向量索引（后者不依赖 AI）
+            console.error('[reindexAllNotes] AI keywords failed, skip note', note.id, err);
+            keywordsFailed++;
+          }
         }
-      } catch (err) {
-        // AI 不可用时降级（如 Workers 部署无公网可达的 AI 端点）：
-        // 跳过该条关键词，不阻塞本地 hash-ngram 向量索引（后者不依赖 AI）
-        console.error('[reindexAllNotes] AI keywords failed, skip note', note.id, err);
-        keywordsFailed++;
-      }
-    }
-    await indexNote(note.id);
+        await indexNote(note.id);
+      })
+    );
   }
+
   return { indexed: notes.length, keywordsGenerated, keywordsFailed };
 }
 

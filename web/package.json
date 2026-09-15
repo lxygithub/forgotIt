@@ -15,7 +15,8 @@
     "build:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build",
     "preview:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "d1:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > d1/schema.sql"
+    "pg:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/pg/schema.sql",
+    "migrate:d1-to-pg": "bun scripts/migrate-d1-to-pg.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -25,6 +26,7 @@
     "@mdxeditor/editor": "^3.39.1",
     "@opennextjs/cloudflare": "^1.20.6",
     "@prisma/adapter-d1": "6",
+    "@prisma/adapter-pg": "6.19.3",
     "@prisma/client": "^6.11.1",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
@@ -68,6 +70,7 @@
     "next-auth": "^4.24.11",
     "next-intl": "^4.3.4",
     "next-themes": "^0.4.6",
+    "pg": "^8.23.0",
     "prisma": "^6.11.1",
     "react": "^19.0.0",
     "react-day-picker": "^9.8.0",

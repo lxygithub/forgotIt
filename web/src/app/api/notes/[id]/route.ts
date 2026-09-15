@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { serializeNote, noteInclude, attachToNote } from '@/lib/note-repo';
-import { logSync } from '@/lib/sync-server';
+import { logSync, logSyncInTx } from '@/lib/sync-server';
 import { indexNoteAsync } from '@/lib/embedding';
 
 export const dynamic = 'force-dynamic';
@@ -72,13 +72,19 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (!existing) return NextResponse.json({ error: '笔记不存在' }, { status: 404 });
 
     if (permanent) {
-      // 记录墓碑（文档 6.5：软删除 + 墓碑，确保多端一致）+ 同步流水
-      await db.tombstone
-        .create({ data: { entityType: 'note', entityId: id } })
-        .catch(() => undefined);
-      await logSync('note', id, 'delete');
-      // 附件与标签关联由 onDelete: Cascade 一并清理
-      await db.note.delete({ where: { id } });
+      // 墓碑、同步流水、实体删除必须原子：
+      //  - 原先 tombstone 用 .catch(() => undefined) 吞掉一切错误，SQLite 本地几乎不失败，
+      //    但换成网络型数据库后真会失败，墓碑会静默丢失；
+      //  - 且三者分开执行，可能出现「笔记已删、流水未写」——其他端就永远收不到删除指令。
+      await db.$transaction(
+        async (tx) => {
+          await tx.tombstone.create({ data: { entityType: 'note', entityId: id } });
+          await logSyncInTx(tx, 'note', id, 'delete');
+          // 附件与标签关联由 onDelete: Cascade 一并清理
+          await tx.note.delete({ where: { id } });
+        },
+        { timeout: 15000 }
+      );
     } else {
       await db.note.update({ where: { id }, data: { deletedAt: new Date(), pinned: false } });
       await logSync('note', id, 'delete');

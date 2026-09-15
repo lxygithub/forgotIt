@@ -38,13 +38,26 @@ export async function GET(req: NextRequest) {
     }
 
     if (q) {
+      // mode: 'insensitive' → PG 生成 ILIKE（SQLite 的 LIKE 本就不区分大小写，
+      // 迁到 PostgreSQL 后不加会静默漏掉英文关键词，详见 src/lib/search.ts 的同款说明）
       const kwFilter = {
         OR: [
-          { title: { contains: q } },
-          { content: { contains: q } },
-          { summary: { contains: q } },
-          { attachments: { some: { OR: [{ ocrText: { contains: q } }, { description: { contains: q } }] } } },
-          { tags: { some: { tag: { name: { contains: q } } } } },
+          { title: { contains: q, mode: 'insensitive' as const } },
+          { content: { contains: q, mode: 'insensitive' as const } },
+          { summary: { contains: q, mode: 'insensitive' as const } },
+          {
+            attachments: {
+              some: {
+                OR: [
+                  { ocrText: { contains: q, mode: 'insensitive' as const } },
+                  { description: { contains: q, mode: 'insensitive' as const } },
+                ],
+              },
+            },
+          },
+          {
+            tags: { some: { tag: { name: { contains: q, mode: 'insensitive' as const } } } },
+          },
         ],
       };
       // 与类型筛选共存时取交集

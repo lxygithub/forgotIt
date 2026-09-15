@@ -1,13 +1,11 @@
-// Cloudflare Workers 运行时访问助手（双部署支持，v1.3）
-// 仅当 DB_DRIVER=d1 / STORAGE_DRIVER=r2 时才会被实际调用；Node 部署永不触碰。
-// binding 约定见 web/wrangler.jsonc：D1 → "DB"，R2 → "BUCKET"。
+// Cloudflare Workers 运行时访问助手
+// 数据库已迁往自建 PostgreSQL，连接逻辑见 src/lib/db.ts（走 Hyperdrive）；
+// 这里只负责对象存储 R2。
+// binding 约定见 web/wrangler.jsonc：R2 → "BUCKET"。
 //
 // 说明：@opennextjs/cloudflare/cloudflare-context 是自包含模块（读取 worker 入口
 // 预埋在 globalThis 的上下文），在 Node 侧仅被解析、从不执行，不影响现有部署。
-import { PrismaD1 } from '@prisma/adapter-d1';
 import { getCloudflareContext } from '@opennextjs/cloudflare/cloudflare-context';
-
-export type D1Binding = ConstructorParameters<typeof PrismaD1>[0];
 
 export interface R2ObjectLike {
   body: ReadableStream<Uint8Array>;
@@ -25,22 +23,11 @@ export interface R2BucketLike {
 }
 
 interface CloudflareEnv {
-  DB: D1Binding;
   BUCKET: R2BucketLike;
 }
 
 function env(): CloudflareEnv {
   return getCloudflareContext().env as unknown as CloudflareEnv;
-}
-
-export function getD1Binding(): D1Binding {
-  const binding = env()?.DB;
-  if (!binding) {
-    throw new Error(
-      'DB_DRIVER=d1 未找到 D1 binding：检查 wrangler.jsonc 中 d1_databases.binding 是否为 "DB"'
-    );
-  }
-  return binding;
 }
 
 export function getR2Bucket(): R2BucketLike {

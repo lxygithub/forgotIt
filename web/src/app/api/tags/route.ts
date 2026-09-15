@@ -11,17 +11,26 @@ export async function GET() {
   try {
     await ensureDefaultCategories();
 
-    const tags = await db.tag.findMany({
-      include: { notes: { include: { note: { select: { deletedAt: true } } } } },
-      orderBy: { createdAt: 'asc' },
-    });
+    // 计数交给数据库：原先用 include 把「所有标签 × 所有关联 × 每条笔记的 deletedAt」
+    // 全量拉进 JS 再过滤统计。数据库在本机时无感，迁到经隧道的自建 PG 后，
+    // 这份全表数据要走网络，标签一多就成瓶颈。
+    const [tags, countRows] = await Promise.all([
+      db.tag.findMany({ orderBy: { createdAt: 'asc' } }),
+      db.noteTag.groupBy({
+        by: ['tagId'],
+        where: { note: { deletedAt: null } }, // 回收站中的笔记不计入
+        _count: { _all: true },
+      }),
+    ]);
+
+    const countByTag = new Map(countRows.map((r) => [r.tagId, r._count._all]));
 
     const withCount = tags.map((t) => ({
       id: t.id,
       name: t.name,
       kind: t.kind as 'category' | 'free',
       color: t.color,
-      count: t.notes.filter((nt) => nt.note.deletedAt === null).length,
+      count: countByTag.get(t.id) ?? 0,
     }));
 
     const categories = withCount

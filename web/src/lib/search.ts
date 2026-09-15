@@ -27,27 +27,50 @@ export async function keywordSearchNotes(query: string, take = 20): Promise<stri
   const candidates = [query, ...keywords].filter((kw) => kw.length >= 2).slice(0, 13);
   if (candidates.length === 0) return [];
 
+  // mode: 'insensitive' → PostgreSQL 下生成 ILIKE。
+  // 迁移前是 SQLite，其 LIKE 对 ASCII 天然不区分大小写；PG 的 LIKE 区分大小写，
+  // 不显式指定会让 "API"/"pdf" 这类英文关键词静默漏检。
   const where = (kw: string) => ({
     deletedAt: null,
     OR: [
-      { title: { contains: kw } },
-      { content: { contains: kw } },
-      { summary: { contains: kw } },
-      { semanticKeywords: { contains: kw } },
-      { attachments: { some: { OR: [{ ocrText: { contains: kw } }, { description: { contains: kw } }] } } },
-      { tags: { some: { tag: { name: { contains: kw } } } } },
+      { title: { contains: kw, mode: 'insensitive' as const } },
+      { content: { contains: kw, mode: 'insensitive' as const } },
+      { summary: { contains: kw, mode: 'insensitive' as const } },
+      { semanticKeywords: { contains: kw, mode: 'insensitive' as const } },
+      {
+        attachments: {
+          some: {
+            OR: [
+              { ocrText: { contains: kw, mode: 'insensitive' as const } },
+              { description: { contains: kw, mode: 'insensitive' as const } },
+            ],
+          },
+        },
+      },
+      {
+        tags: {
+          some: { tag: { name: { contains: kw, mode: 'insensitive' as const } } },
+        },
+      },
     ],
   });
 
+  // 并发发起所有候选词的查询。原先逐个 await 是 13 次串行往返 —— 数据库在本机时
+  // 无感，但迁到自建 PG（经隧道）后每次往返都是几十毫秒，会累积成秒级首字节。
+  const resultSets = await Promise.all(
+    candidates.map((kw) =>
+      db.note.findMany({
+        where: where(kw),
+        select: { id: true },
+        orderBy: { updatedAt: 'desc' },
+        take,
+      })
+    )
+  );
+
+  // 按候选词顺序合并名次，语义与串行版完全一致：整句优先，先到者名次高
   const rank = new Map<string, number>();
-  // 整句优先，其后按关键词逐个补检；先到者名次高
-  for (const kw of candidates) {
-    const found = await db.note.findMany({
-      where: where(kw),
-      select: { id: true },
-      orderBy: { updatedAt: 'desc' },
-      take,
-    });
+  for (const found of resultSets) {
     for (const n of found) {
       if (!rank.has(n.id)) rank.set(n.id, rank.size + 1);
       if (rank.size >= take) break;
