@@ -1,0 +1,43 @@
+// Cloudflare Workers 部署配置（双部署支持，v1.3）— 详见《forgotIt部署文档.md》§11
+// 首次部署三步：
+//   1) npx wrangler d1 create forgotit   → 把输出的 database_id 替换到下面
+//   2) npx wrangler r2 bucket create forgotit-uploads
+//   3) 按 §11 设置 secrets（NEXTAUTH_SECRET / AUTH_PASSWORD_HASH / ZAI_* 等）后 `bun run deploy:cf`
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "forgotit",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // 把 bundle 目录内全部文件（含 Prisma wasm）上传为可通过 node:fs 读取的模块
+  "find_additional_modules": true,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "forgotit",
+      // ⚠️ 占位符：替换为 `wrangler d1 create forgotit` 输出的真实 database_id
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "forgotit-uploads"
+    }
+  ],
+  "vars": {
+    // 双部署开关：Workers 固定为 d1/r2（Node 部署不读这两个变量，保持缺省即可）
+    "DB_DRIVER": "d1",
+    "STORAGE_DRIVER": "r2",
+    // ⚠️ 替换为你的实际访问地址（如 https://forgotit.<account>.workers.dev 或自定义域）
+    "NEXTAUTH_URL": "https://forgotit.example.workers.dev",
+    "AUTH_USERNAME": "owner"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

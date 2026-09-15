@@ -118,15 +118,16 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 
 - **框架**：Next.js 16（App Router）+ React 19 + TypeScript
 - **UI**：Tailwind CSS 4 + shadcn/ui + Lucide 图标 + framer-motion
-- **数据**：Prisma ORM + SQLite（单文件，`db/custom.db`）；生产可平滑迁移 PostgreSQL + pgvector
+- **数据**：Prisma ORM + SQLite（单文件，`db/custom.db`）；生产可平滑迁移 PostgreSQL + pgvector；**双部署支持**（Node 走文件库，Cloudflare Workers 走 D1）
 - **状态**：Zustand（同步引擎 / 本地覆盖层）+ localStorage（outbox、游标、设备 ID）
-- **AI**：z-ai-web-dev-sdk（服务端），Prompt 规范对齐开发文档第 16 节
+- **AI**：内置平台中立 fetch 层（环境变量优先 → `.z-ai-config` 文件兑底），Prompt 规范对齐开发文档第 16 节
 
 ## 路线图
 
 - [x] Web 原型 v1.0：笔记 / AI 整理 / RAG 问答 / 标签 / 回收站 / 主题
 - [x] Web 原型 v1.1：语义向量搜索（RRF 混合检索）+ 多设备同步（LWW + 冲突快照）
 - [x] Web 原型 v1.2：单用户鉴权（NextAuth 密码门禁）+ README 与部署文档
+- [x] Web 原型 v1.3：双部署支持（同一代码库 Node + Cloudflare Workers/D1/R2，环境变量切换；Next 升级 16.3.5，AI 层平台中立化）
 - [x] 原生移动端开发文档 v1.0（Android/iOS=Flutter，鸿蒙=ArkTS，含 API 契约/同步协议/一致性基准，供本机 AI 执行）
 - [ ] Flutter App（Android + iOS，flutter_gemma 端侧推理，见开发文档 §15 与原生移动端开发文档 §8）
 - [ ] 鸿蒙 App（HarmonyOS NEXT 原生 ArkTS，见原生移动端开发文档 §9）
@@ -140,5 +141,5 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 | --- | --- |
 | [forgotIt开发文档.md](./forgotIt开发文档.md) | 完整产品与技术方案 v2.0：决策日志 D1-D9、模型选型、数据模型、同步/RAG 设计、Prompt 规范、测试与合规 |
 | [forgotIt原生移动端开发文档.md](./forgotIt原生移动端开发文档.md) | Android/iOS（Flutter）与鸿蒙（ArkTS）原生客户端开发文档：服务端对接契约（NextAuth 登录流）、LWW 同步协议精确规范、三端一致的端侧检索算法与对拍基准、页面规格、安全合规、里程碑 M0-M4/H1-H2 |
-| [forgotIt部署文档.md](./forgotIt部署文档.md) | 环境要求、本地/生产部署（systemd / PM2 / Docker）、AI 凭证配置、数据库运维、常见问题（含实测坑点） |
+| [forgotIt部署文档.md](./forgotIt部署文档.md) | 环境要求、本地/生产部署（systemd / PM2 / Docker）、AI 凭证配置、数据库运维、Cloudflare Workers 可选路线（§11）、常见问题（含实测坑点） |
 | [web/README.md](./web/README.md) | Web 端目录结构、开发命令、API 一览（含鉴权）、语义检索 / 同步 / 鉴权实现说明 |

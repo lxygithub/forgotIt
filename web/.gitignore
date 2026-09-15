@@ -24,3 +24,11 @@ public/uploads/
 .DS_Store
 .vercel
 *.tsbuildinfo
+
+# cloudflare workers (双部署，v1.3)
+.wrangler/
+.open-next/
+.dev.vars
+
+# Workers 专用 Prisma 客户端（bun run build:cf 自动生成）
+src/generated/

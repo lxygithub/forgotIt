@@ -14,6 +14,7 @@
 | **A. 本机体验** | 想先跑起来看看 | §3 |
 | **B. 自托管生产** | 部署到 VPS / 家庭服务器长期使用 | §4 + §5 + §9 |
 | **C. 内网多设备** | 几台设备（电脑 + 手机）同步一套脑子 | §4 + §8 |
+| **D. Cloudflare Workers** | 想白嫖 serverless、不想管服务器 | §11（可选路线，同一代码库） |
 
 > **鉴权说明（v1.2 起内置）**：Web 端自带**单用户鉴权**（NextAuth 方案 A：用户名 + 密码，
 > JWT 会话 30 天；页面 / API / 上传图片统一门禁；未配置凭证时拒绝一切登录，详见 §4.7）。
@@ -469,6 +470,91 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 
 ---
 
+## 11. Cloudflare Workers 部署（可选路线，双部署支持）
+
+> **v1.3 起同一代码库同时支持两种部署方式**，环境变量切换，Node 部署（§3/§4）完全不受影响。
+>
+> **诚实声明（实测验证状态见附录 A #13-#18）**：Node 路径全量回归通过；Workers 路径已完成
+> OpenNext 构建与冒烟（门禁 / NextAuth 登录 / AI 环境变量凭证 / D1·R2 binding 全部通过），
+> D1 查询链路的最后一环（wasm 引擎加载）已按官方 workerd 通道就位，但本沙箱
+> （2 核 / 4GB，miniflare 本地 fs 映射与生产 workerd 存在差异）**未能完成端到端验证**——
+> 请按 §11.5 在你本机验证后再正式上线；期间 §4 的 Node 路线随时可用作回退。
+
+### 11.1 双端架构差异
+
+| | Node（§4） | Workers（本节） |
+| --- | --- | --- |
+| 构建产物 | `.next/standalone` | OpenNext Worker（`.open-next/`） |
+| 数据库 | SQLite 文件（`DATABASE_URL`） | Cloudflare D1（同一份 SQLite 方言 schema） |
+| 图片存储 | 磁盘 `public/uploads` | R2（存储适配层，读写同路径 `/uploads/…`） |
+| AI 凭证 | `.z-ai-config` 文件（§5） | 环境变量 `ZAI_BASE_URL`/`ZAI_API_KEY`（可选 `ZAI_TOKEN`） |
+| 切换变量 | 无需设置（默认即 Node） | `DB_DRIVER=d1`、`STORAGE_DRIVER=r2`（wrangler vars） |
+| 接入层 | 可再加 CF 橙云 / Tunnel | 直连边缘 |
+
+关键实现（理解后再排障）：`src/lib/db.ts` 按 `DB_DRIVER` 选择驱动——Node 走默认 Prisma
+客户端，Workers 走新生成器产出的 workerd 客户端（wasm 引擎以
+`import('./query_engine_bg.wasm?module')` 静态导入，wrangler 自动编译注册）+
+`@prisma/adapter-d1`。图片经 `src/lib/storage/` 抽象（local / r2 两实现），
+Workers 上由 `/uploads/[...key]` 路由从 R2 流式读取，鉴权门禁（`/uploads/*`）两端一致。
+
+### 11.2 一次性准备
+
+```bash
+cd web && bun install                       # wrangler 已在 devDependencies
+bunx wrangler login
+bunx wrangler d1 create forgotit            # → 把输出的 database_id 填进 web/wrangler.jsonc
+bunx wrangler r2 bucket create forgotit-uploads
+bun run d1:schema                           # prisma migrate diff 生成 d1/schema.sql
+bunx wrangler d1 execute forgotit --remote --file d1/schema.sql
+```
+
+### 11.3 Secrets 与 vars
+
+```bash
+bunx wrangler secret put NEXTAUTH_SECRET      # openssl rand -base64 32
+bunx wrangler secret put AUTH_PASSWORD_HASH   # 生成方式：bun run hash-password <你的密码>
+bunx wrangler secret put ZAI_BASE_URL         # 可选：不配置则 AI 功能按 §5 降级
+bunx wrangler secret put ZAI_API_KEY
+# wrangler.jsonc vars 中改 NEXTAUTH_URL 为实际地址（如 https://forgotit.<account>.workers.dev）
+```
+
+### 11.4 构建与部署
+
+```bash
+bun run deploy:cf
+# 等价于：scripts/gen-workers-schema.mjs（从主 schema 派生 workers schema，防漂移）
+#        + prisma generate（workerd 运行时客户端）+ opennextjs-cloudflare build + deploy
+```
+
+- 每次改过 `prisma/schema.prisma` 后重新 `deploy:cf` 即可（workers 客户端自动重新生成）；
+- 本地先看效果：`bun run preview:cf`。
+
+### 11.5 本机验证清单（上线前必过）
+
+```bash
+bunx wrangler d1 execute forgotit --local --file d1/schema.sql   # 本地 D1 建表
+cp .dev.vars.example .dev.vars                                    # 本地凭证（已 gitignore）
+bun run build:cf && bunx wrangler dev --port 8787
+```
+
+- [ ] 未登录 `curl -i localhost:8787/api/stats` → 401；访问 `/` → 307 跳登录
+- [ ] 登录后 `/api/stats` 返回 JSON；创建笔记 → 200（D1 写入）
+- [ ] 上传图片 → `GET /uploads/<文件名>` → 200（R2 写读往返）
+- [ ] `GET /api/sync/pull?since=0` → cursor JSON
+- [ ] 配置 `ZAI_*` 后语义搜索返回结果
+
+### 11.6 已知边界与排障
+
+| 症状 | 原因 | 处理 |
+| --- | --- | --- |
+| Prisma 报 `could not locate the Query Engine` | 用了 Node 客户端（无 wasm 变体） | 走 `bun run build:cf` 全链路（会自动生成 workerd 客户端），勿单独手工 generate |
+| `WebAssembly.compile(): code generation disallowed` | workerd 禁止运行时 wasm 编译 | 确认用的是新生成器（`runtime = "workerd"`，`?module` 静态导入），不要回退 FORCE_WASM/readFileSync 方案 |
+| `next build` 被 Killed | Turbopack 内存需求高（2 核 / 4GB 小内存机器实测会被杀） | webpack 备选通道：`bunx next build --webpack && bunx opennextjs-cloudflare build --skipNextBuild`（`asyncWebAssembly` 已在 next.config 开启；产物需把 `.next/server/chunks/static/wasm/*.wasm` 拷到 `.open-next/server-functions/default/static/wasm/`） |
+| D1 交互式事务报错 | D1 适配器仅支持批事务 | 本项目唯一事务是数组批形式（`embedding.ts`），天然兼容；新增代码请勿用回调式事务 |
+| 上传图片 413 | Workers 请求体上限 100MB | 远大于应用自身 8MB 限制，一般不会触发 |
+
+---
+
 ## 附录 A：本文档验证记录
 
 | # | 验证项 | 结果 |
@@ -485,5 +571,11 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 | 10 | 方案 A 鉴权门禁：未登录访问 API / 上传图片 / 页面 | ✅ 401 JSON / 307 跳登录 / 302 跳登录 |
 | 11 | 登录全流程：错误密码提示、正确登录、会话读取、登出、登出后再访根路径 | ✅ curl + 浏览器全流程通过 |
 | 12 | 登录页视觉：移动端 390×844、深色模式、0 控制台错误 | ✅ 通过 |
+| 13 | Next.js 16.1.3 → 16.3.5 升级 + 双部署抽象层（storage/db/ai/cf 四层），Node 路径全量回归（门禁/登录/21 端点/AI 整理·RAG·语义/上传） | ✅ 通过 |
+| 14 | sharp 移除 + `images.unoptimized`（图片链路双端一致化），上传与图片回读回归 | ✅ 通过 |
+| 15 | OpenNext 构建（webpack 通道：`next build --webpack` + `opennextjs-cloudflare build --skipNextBuild`，含 workers 客户端与 wasm） | ✅ 通过 |
+| 16 | Workers（miniflare 本地）冒烟：门禁 401/307、NextAuth scrypt 登录、AI 环境变量凭证、D1/R2 binding 注入、`find_additional_modules` | ✅ 通过 |
+| 17 | Workers D1 查询端到端（wasm 引擎在 workerd 加载） | ⏳ 沙箱受限未完成（2 核被守护进程杀 + miniflare `/bundle` fs 映射与生产 workerd 有差异），架构已按官方通道就位，待 §11.5 真机验证 |
+| 18 | Turbopack 通道构建（`bun run build:cf` 默认路径） | ⏳ 2 核 / 4GB 沙箱被杀（137）；正常内存机器应可完成，不行则用 #15 的 webpack 备选通道 |
 
-实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3 / Prisma 6.19.2 / next-auth 4.24.13 / Debian（openssl 3.0.x）
+实测环境：Bun 1.3.14 / Node 24.19.0 / Next.js 16.1.3→16.3.5 / Prisma 6.19.2 / next-auth 4.24.11 / @opennextjs/cloudflare 1.20.6 / @prisma/adapter-d1 6.19.3 / wrangler 4.x / Debian（openssl 3.0.x）

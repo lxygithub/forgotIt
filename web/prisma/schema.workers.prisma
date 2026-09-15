@@ -2,10 +2,10 @@
 // Prisma schema 对应文档 v2.0 第 6.3 / 14.2 节数据模型（单用户本地版）
 
 generator client {
-  provider = "prisma-client-js"
-  // driverAdapters：prisma-client-js 生成器（6.x）启用 D1 等驱动适配器所必需
-  // （弃用警告无害；仅 Workers 部署用到适配器，Node 部署行为不变。见部署文档 §11）
-  previewFeatures = ["driverAdapters", "queryCompiler"]
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma-worker"
+  runtime      = "workerd"
+  moduleFormat = "esm"
 }
 
 datasource db {

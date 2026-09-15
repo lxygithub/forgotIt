@@ -1,0 +1,15 @@
+# Cloudflare Workers 本地冒烟测试变量（`wrangler dev` 自动加载；真实部署用 wrangler secret put）
+# 复制为 .dev.vars 后按需修改；.dev.vars 已被 .gitignore 排除，禁止提交真实凭证。
+NEXTAUTH_SECRET=dev-only-secret-replace-me
+NEXTAUTH_URL=http://localhost:8787
+AUTH_USERNAME=owner
+AUTH_PASSWORD=dev-only-password
+
+# 双部署开关（与 wrangler.jsonc vars 一致，本地 dev 用 .dev.vars 注入）
+DB_DRIVER=d1
+STORAGE_DRIVER=r2
+
+# 可选：AI 能力（不配置时 AI 功能按部署文档 §5 降级，核心功能不受影响）
+# ZAI_BASE_URL=https://api.z.ai/api/paas/v4
+# ZAI_API_KEY=your-key
+# ZAI_TOKEN=optional-token-header

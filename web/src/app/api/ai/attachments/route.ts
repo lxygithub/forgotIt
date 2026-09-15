@@ -3,10 +3,8 @@
 // 对应文档 v2.0 第 4.3 节分工规则与 16.4 节图片理解 Prompt
 
 import { NextRequest, NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
-import path from 'path';
 import { db } from '@/lib/db';
+import { getStorage } from '@/lib/storage';
 import { aiAnalyzeImage } from '@/lib/ai';
 import { recomputeNoteType } from '@/lib/note-repo';
 
@@ -47,13 +45,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '图片太大了，请控制在 8MB 以内' }, { status: 400 });
     }
 
-    // 保存到 public/uploads（dev 环境下静态可访问 /uploads/xxx）
+    // 保存文件（存储抽象：Node 默认写 public/uploads；Workers 写 R2，见部署文档 §11）
     const ext = MIME_EXT[mimeType];
-    const fileName = `${randomUUID()}.${ext}`;
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    await mkdir(uploadDir, { recursive: true });
-    await writeFile(path.join(uploadDir, fileName), buffer);
-    const filePath = `/uploads/${fileName}`;
+    const fileName = `${crypto.randomUUID()}.${ext}`;
+    const filePath = await getStorage().save(fileName, new Uint8Array(buffer), mimeType);
 
     // VLM 描述 + OCR（并行不需要，单次调用同时返回两项）
     let description: string | null = null;
@@ -67,17 +62,10 @@ export async function POST(req: NextRequest) {
       // AI 失败不阻塞入库，稍后可重新整理
     }
 
-    // 图片尺寸（sharp 可用则取，失败忽略）
-    let width: number | null = null;
-    let height: number | null = null;
-    try {
-      const sharp = (await import('sharp')).default;
-      const meta = await sharp(buffer).metadata();
-      width = meta.width ?? null;
-      height = meta.height ?? null;
-    } catch {
-      // ignore
-    }
+    // 图片尺寸：v1.3 起不依赖 sharp（原生库会破坏 Workers 构建，且前端不消费该元数据），
+    // width/height 保持 null（模型字段本来可空）
+    const width: number | null = null;
+    const height: number | null = null;
 
     const attachment = await db.attachment.create({
       data: {

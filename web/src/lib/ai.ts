@@ -1,21 +1,121 @@
-// 「记不住」AI 能力层（服务端专用，z-ai-web-dev-sdk）
+// 「记不住」AI 能力层（服务端专用）— v1.3 起平台中立
 // 对应开发文档 v2.0 第 16 节 Prompt 规范：
 //   16.1 自动打标签 / 16.2 摘要 / 16.3 RAG 问答 / 16.4 图片理解
-// 原型环境说明：以 z-ai LLM/VLM 模拟「端侧推理」，接口形态与
-// 文档 LlmProvider 抽象（5.2 节）保持一致，便于后续替换真实端侧实现。
+//
+// 双部署说明（部署文档 §5 / §11）：
+//   - 请求形态与 z-ai-web-dev-sdk 0.0.18 完全一致（/chat/completions 与
+//     /chat/completions/vision 两个 OpenAI 兼容端点，Bearer 认证 + thinking 默认
+//     disabled），仅改为内置 fetch 实现，Node 与 Cloudflare Workers 通跑。
+//   - 凭证解析：环境变量 ZAI_BASE_URL / ZAI_API_KEY 优先（Workers 部署必用），
+//     缺省回落 .z-ai-config 文件（cwd → ~ → /etc，查找顺序与 SDK 一致）。
 
-import ZAI from 'z-ai-web-dev-sdk';
 import { DEFAULT_CATEGORIES } from '@/lib/note-repo';
 
-type ZaiClient = Awaited<ReturnType<typeof ZAI.create>>;
+interface ZaiConfig {
+  baseUrl: string;
+  apiKey: string;
+  // 与 SDK 0.0.18 配置字段对齐：存在时随请求头透传（沙箱实测服务端校验 X-Token）
+  token?: string;
+  chatId?: string;
+  userId?: string;
+}
 
-let zaiInstance: ZaiClient | null = null;
+interface ChatMessage {
+  role: string;
+  content: unknown;
+}
 
-export async function getZai(): Promise<ZaiClient> {
-  if (!zaiInstance) {
-    zaiInstance = await ZAI.create();
+interface ChatCompletionResponse {
+  choices?: { message?: { content?: string } }[];
+}
+
+let cachedConfig: ZaiConfig | null | undefined;
+
+/** 解析 Z.ai 凭证：环境变量优先，回落 .z-ai-config 文件（Node 侧） */
+async function resolveZaiConfig(): Promise<ZaiConfig | null> {
+  if (cachedConfig !== undefined) return cachedConfig;
+
+  const envBase = process.env.ZAI_BASE_URL?.trim();
+  const envKey = process.env.ZAI_API_KEY?.trim();
+  if (envBase && envKey) {
+    cachedConfig = {
+      baseUrl: envBase.replace(/\/+$/, ''),
+      apiKey: envKey,
+      token: process.env.ZAI_TOKEN?.trim() || undefined,
+    };
+    return cachedConfig;
   }
-  return zaiInstance;
+
+  // 文件兜底：仅在 Node 侧生效（Workers 无文件系统，import 失败会被捕获）
+  try {
+    const [{ readFile }, os, path] = await Promise.all([
+      import('fs/promises'),
+      import('os'),
+      import('path'),
+    ]);
+    const configPaths = [
+      path.join(process.cwd(), '.z-ai-config'),
+      path.join(os.homedir(), '.z-ai-config'),
+      '/etc/.z-ai-config',
+    ];
+    for (const configPath of configPaths) {
+      try {
+        const parsed = JSON.parse(await readFile(configPath, 'utf-8')) as Partial<ZaiConfig>;
+        if (parsed.baseUrl && parsed.apiKey) {
+          cachedConfig = {
+            baseUrl: parsed.baseUrl.replace(/\/+$/, ''),
+            apiKey: parsed.apiKey,
+            token: typeof parsed.token === 'string' ? parsed.token : undefined,
+            chatId: typeof parsed.chatId === 'string' ? parsed.chatId : undefined,
+            userId: typeof parsed.userId === 'string' ? parsed.userId : undefined,
+          };
+          return cachedConfig;
+        }
+      } catch {
+        // 尝试下一个位置
+      }
+    }
+  } catch {
+    // Workers：无 fs，忽略
+  }
+
+  cachedConfig = null;
+  return cachedConfig;
+}
+
+/** 与 SDK 同形态的 OpenAI 兼容调用（thinking 默认 disabled，与 0.0.18 行为一致） */
+async function zaiChat(
+  body: Record<string, unknown>,
+  vision = false
+): Promise<ChatCompletionResponse> {
+  const config = await resolveZaiConfig();
+  if (!config) {
+    throw new Error(
+      'AI 凭证未配置：设置环境变量 ZAI_BASE_URL / ZAI_API_KEY，或按部署文档 §5 放置 .z-ai-config'
+    );
+  }
+  const url = `${config.baseUrl}${vision ? '/chat/completions/vision' : '/chat/completions'}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${config.apiKey}`,
+    'X-Z-AI-From': 'Z',
+  };
+  if (config.chatId) headers['X-Chat-Id'] = config.chatId;
+  if (config.userId) headers['X-User-Id'] = config.userId;
+  if (config.token) headers['X-Token'] = config.token;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...body,
+      thinking: body.thinking ?? { type: 'disabled' },
+    }),
+  });
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`AI API request failed with status ${response.status}: ${errorBody.slice(0, 300)}`);
+  }
+  return (await response.json()) as ChatCompletionResponse;
 }
 
 /** 从模型输出中提取第一个 JSON 对象并解析（容错：忽略围栏与前后杂文） */
@@ -42,15 +142,13 @@ export function extractJson<T>(raw: string): T | null {
 
 /** 标准 LLM 调用（系统提示用 assistant 角色，符合 SDK 约定） */
 export async function llmChat(system: string, user: string): Promise<string> {
-  const zai = await getZai();
-  const completion = await zai.chat.completions.create({
+  const completion = await zaiChat({
     messages: [
       { role: 'assistant', content: system },
       { role: 'user', content: user },
-    ],
-    thinking: { type: 'disabled' },
+    ] satisfies ChatMessage[],
   });
-  return completion.choices[0]?.message?.content ?? '';
+  return completion.choices?.[0]?.message?.content ?? '';
 }
 
 /** JSON 版 LLM 调用：失败自动附带格式错误重试 1 次（文档 16.1 容错策略） */
@@ -177,25 +275,26 @@ export interface VisionResult {
 }
 
 export async function aiAnalyzeImage(dataUrl: string): Promise<VisionResult> {
-  const zai = await getZai();
   const system =
     '你是「记不住」的图片理解助手。对用户给出的图片完成两件事，只输出一个 JSON 对象：' +
     '{"description":"一句话描述图片内容（60字以内）","ocrText":"逐字提取图中全部可见文字，保留原始换行；图中没有文字时输出空字符串"}。' +
     '注意：精确文字提取是你的任务，描述里不要逐字罗列文字。';
-  const response = await zai.chat.completions.createVision({
-    messages: [
-      { role: 'assistant', content: system },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: '请分析这张图片。' },
-          { type: 'image_url', image_url: { url: dataUrl } },
-        ],
-      },
-    ],
-    thinking: { type: 'disabled' },
-  });
-  const raw = response.choices[0]?.message?.content ?? '';
+  const response = await zaiChat(
+    {
+      messages: [
+        { role: 'assistant', content: system },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '请分析这张图片。' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ] satisfies ChatMessage[],
+    },
+    true
+  );
+  const raw = response.choices?.[0]?.message?.content ?? '';
   const parsed = extractJson<VisionResult>(raw);
   if (parsed && typeof parsed.description === 'string') {
     return {
