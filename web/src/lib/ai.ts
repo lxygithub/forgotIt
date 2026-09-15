@@ -98,7 +98,11 @@ async function zaiChat(
       'AI 凭证未配置：设置环境变量 ZAI_BASE_URL / ZAI_API_KEY，或按部署文档 §5 放置 .z-ai-config'
     );
   }
-  const url = `${config.baseUrl}${vision ? '/chat/completions/vision' : '/chat/completions'}`;
+  // 图片理解走哪个路径：标准 OpenAI 兼容端点（DeepSeek 等）直接用 /chat/completions，
+  // 多模态由请求体里的 image_url 内容块表达；Z.ai 的私有端点是 /chat/completions/vision，
+  // 需要时可设 ZAI_VISION_PATH 覆盖。
+  const visionPath = process.env.ZAI_VISION_PATH?.trim() || '/chat/completions';
+  const url = `${config.baseUrl}${vision ? visionPath : '/chat/completions'}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${config.apiKey}`,
