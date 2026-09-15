@@ -33,12 +33,18 @@
       "bucket_name": "forgotit-uploads"
     }
   ],
-  // 【探针专用】仅用于验证 OpenNext 打包下 pg+Hyperdrive 是否可用；
-  // 正式迁移时这里会取代 d1_databases
+  // 数据库连接：Worker 经 Hyperdrive 连自建 PostgreSQL（详见部署文档 §11.8）
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "dbfd6840d76244dbb5419726644a01a4"
+      "id": "dbfd6840d76244dbb5419726644a01a4",
+      // 占位值：wrangler 在本地/CI 初始化 proxy 时必须有一个连接串，否则
+      // opennextjs-cloudflare deploy 会抛 "no local hyperdrive connection string"。
+      // 线上部署只使用 Hyperdrive 远端的真实连接串，不读这里的值，所以占位即可
+      // （也避免把真实密码写进仓库）。
+      // 本地开发想连真库时，在 .env 里设
+      // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://... 覆盖（环境变量优先）。
+      "localConnectionString": "postgres://forgotit:placeholder@127.0.0.1:5432/forgotit"
     }
   ],
   "vars": {
