@@ -103,6 +103,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
   const [mode, setMode] = useState<'source' | 'preview'>('source');
   const [existingAttachments, setExistingAttachments] = useState<AttachmentDto[]>([]);
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentDto[]>([]);
+  const [previewAttachment, setPreviewAttachment] = useState<AttachmentDto | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -119,6 +120,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
     setMode('source');
     setExistingAttachments(note?.attachments ?? []);
     setPendingAttachments([]);
+    setPreviewAttachment(null);
     setSaving(false);
     setDeleting(false);
     snapshotRef.current = JSON.stringify([
@@ -314,22 +316,36 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
             <div className="flex min-w-0 flex-wrap gap-2">
               {existingAttachments.map((att) => (
                 <div key={att.id} className="group/att relative">
-                  <img
-                    src={att.filePath}
-                    alt={att.description || '笔记附件图片'}
-                    title={att.description || att.ocrText || '（AI 未生成描述）'}
-                    className="size-16 rounded-md border object-cover"
-                  />
+                  <button
+                    type="button"
+                    aria-label="查看大图"
+                    onClick={() => setPreviewAttachment(att)}
+                    className="block rounded-md outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    <img
+                      src={att.filePath}
+                      alt={att.description || '笔记附件图片'}
+                      title={att.description || att.ocrText || '（AI 未生成描述）'}
+                      className="size-16 rounded-md border object-cover"
+                    />
+                  </button>
                 </div>
               ))}
               {pendingAttachments.map((att) => (
                 <div key={att.id} className="relative">
-                  <img
-                    src={att.filePath}
-                    alt={att.description || '新上传的图片'}
-                    title={att.description || att.ocrText || '（AI 未生成描述）'}
-                    className="size-16 rounded-md border border-primary object-cover ring-1 ring-primary/40"
-                  />
+                  <button
+                    type="button"
+                    aria-label="查看大图"
+                    onClick={() => setPreviewAttachment(att)}
+                    className="block rounded-md outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    <img
+                      src={att.filePath}
+                      alt={att.description || '新上传的图片'}
+                      title={att.description || att.ocrText || '（AI 未生成描述）'}
+                      className="size-16 rounded-md border border-primary object-cover ring-1 ring-primary/40"
+                    />
+                  </button>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -438,6 +454,27 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
           </div>
         </div>
       </DialogContent>
+
+      <Dialog
+        open={previewAttachment !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setPreviewAttachment(null);
+        }}
+      >
+        <DialogContent className="z-[60] w-auto max-w-[calc(100%-1rem)] border-0 bg-black/90 p-2 shadow-2xl sm:max-w-4xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>查看大图</DialogTitle>
+            <DialogDescription>{previewAttachment?.description || '笔记附件图片'}</DialogDescription>
+          </DialogHeader>
+          {previewAttachment && (
+            <img
+              src={previewAttachment.filePath}
+              alt={previewAttachment.description || '笔记附件图片'}
+              className="max-h-[85dvh] max-w-full rounded object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

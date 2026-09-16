@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ClipboardPaste, Loader2, PenLine } from 'lucide-react';
+import { ClipboardPaste, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { AppFooter } from '@/components/forgotit/app-footer';
@@ -55,6 +55,8 @@ export default function Home() {
   const [capturing, setCapturing] = useState(false);
   const capturingRef = useRef(false);
   const readingClipboardRef = useRef(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
 
   // 探测 AI 是否已配置（决定粘贴后是否自动 AI 解析；窗口重新聚焦时刷新）
   useEffect(() => {
@@ -170,6 +172,38 @@ export default function Home() {
     setEditorOpen(true);
   }, []);
 
+  const cancelFabLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleFabPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0 || capturing) return;
+    longPressTriggeredRef.current = false;
+    cancelFabLongPress();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressTriggeredRef.current = true;
+      void handleMobilePaste();
+    }, 550);
+  };
+
+  const handleFabClick = () => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+    openNewNote();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current !== null) clearTimeout(longPressTimerRef.current);
+    };
+  }, []);
+
   const openNoteById = useCallback(async (noteId: string) => {
     try {
       const res = await getNote(noteId);
@@ -257,40 +291,29 @@ export default function Home() {
         )}
         {view === 'notes' && (
           <motion.div
-            key="mobile-actions"
+            key="new-note-action"
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
             transition={{ duration: 0.18 }}
-            className="fixed bottom-20 right-4 z-40 flex flex-col items-end gap-2 md:bottom-6 md:right-6"
+            className="fixed bottom-20 right-4 z-40 md:bottom-6 md:right-6"
           >
             <Button
-              variant="outline"
-              aria-label="记一条新笔记"
-              className="h-10 rounded-full bg-card/95 px-3 text-sm shadow-md backdrop-blur md:hidden"
-              onClick={openNewNote}
-            >
-              <PenLine className="size-4" aria-hidden="true" />
-              记一条
-            </Button>
-            <Button
               size="lg"
-              aria-label="从剪贴板记下新笔记"
-              className="h-14 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90 md:hidden"
-              onClick={() => void handleMobilePaste()}
+              aria-label="点击手动添加笔记，长按从剪贴板自动添加"
+              title="点击手动添加，长按粘贴自动添加"
+              className="h-14 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90"
+              onPointerDown={handleFabPointerDown}
+              onPointerUp={cancelFabLongPress}
+              onPointerCancel={cancelFabLongPress}
+              onPointerLeave={cancelFabLongPress}
+              onContextMenu={(event) => event.preventDefault()}
+              onClick={handleFabClick}
               disabled={capturing}
             >
               {capturing ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <ClipboardPaste className="size-5" aria-hidden="true" />}
               {capturing ? '正在记下' : '粘贴记下'}
-            </Button>
-            <Button
-              size="lg"
-              aria-label="记一条新笔记"
-              className="hidden h-14 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90 md:inline-flex"
-              onClick={openNewNote}
-            >
-              <PenLine className="size-5" aria-hidden="true" />
-              记一条
+              {!capturing && <span className="text-[10px] font-normal opacity-80">长按</span>}
             </Button>
           </motion.div>
         )}
