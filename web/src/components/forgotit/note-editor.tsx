@@ -223,7 +223,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-auto bottom-0 left-2 right-2 w-auto max-w-none translate-x-0 translate-y-0 rounded-b-none p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[calc(100dvh-0.5rem)] overflow-x-hidden overflow-y-auto sm:top-1/2 sm:left-1/2 sm:right-auto sm:w-full sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6 sm:pb-6 sm:max-h-[92dvh]">
+      <DialogContent className="top-auto bottom-0 left-2 right-2 w-auto max-w-none translate-x-0 translate-y-0 rounded-b-none p-4 pb-0 max-h-[calc(100dvh-0.5rem)] overflow-x-hidden overflow-y-auto sm:top-1/2 sm:left-1/2 sm:right-auto sm:w-full sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6 sm:pb-0 sm:max-h-[92dvh]">
         <DialogHeader className="min-w-0 pr-8">
           <DialogTitle>{isNew ? '记一条' : '编辑笔记'}</DialogTitle>
           <DialogDescription>
@@ -368,7 +368,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
         </div>
 
         {/* 底部操作 */}
-        <div className="flex min-w-0 flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center">
+        <div className="sticky bottom-0 z-10 -mx-4 flex min-w-0 flex-col gap-2 border-t bg-background/95 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:px-6 sm:pb-6">
           {!isNew && (
             <Button
               variant="ghost"

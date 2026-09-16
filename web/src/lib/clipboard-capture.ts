@@ -53,6 +53,38 @@ export function extractFromClipboard(dt: DataTransfer | null): CapturedContent |
   return { text, imageFiles: imageFiles.slice(0, MAX_PASTE_IMAGES) };
 }
 
+/**
+ * 从 Clipboard API 主动读取内容，供触屏设备的「粘贴记下」按钮使用。
+ * 支持的浏览器会读取文字和图片；仅实现 readText 的浏览器自动退化为文字快记。
+ * 必须从用户点击等直接手势中调用，否则浏览器会拒绝剪贴板权限。
+ */
+export async function readClipboardContent(): Promise<CapturedContent | null> {
+  if (!navigator.clipboard) throw new Error('当前浏览器不支持读取剪贴板');
+
+  let text = '';
+  const imageFiles: File[] = [];
+  if (typeof navigator.clipboard.read === 'function') {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      if (!text && item.types.includes('text/plain')) {
+        const blob = await item.getType('text/plain');
+        text = (await blob.text()).trim().slice(0, MAX_PASTE_TEXT);
+      }
+      for (const type of item.types) {
+        if (!type.startsWith('image/') || imageFiles.length >= MAX_PASTE_IMAGES) continue;
+        const blob = await item.getType(type);
+        if (blob.size === 0 || blob.size > MAX_IMAGE_BYTES) continue;
+        const extension = type.split('/')[1] || 'png';
+        imageFiles.push(new File([blob], `clipboard.${extension}`, { type }));
+      }
+    }
+  } else {
+    text = (await navigator.clipboard.readText()).trim().slice(0, MAX_PASTE_TEXT);
+  }
+
+  return text || imageFiles.length > 0 ? { text, imageFiles } : null;
+}
+
 /** paste 目标是否在可编辑控件内（是则放行原生粘贴，不劫持建笔记） */
 export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

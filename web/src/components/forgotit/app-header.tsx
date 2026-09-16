@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Brain, CloudOff, Loader2, LogOut, RefreshCw, Settings2 } from 'lucide-react';
+import { Brain, CloudOff, Loader2, LogOut, RefreshCw } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 import {
   AlertDialog,
@@ -13,20 +13,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
-import { AiSettingsDialog } from '@/components/forgotit/ai-settings-dialog';
-import { ThemeToggle } from '@/components/forgotit/theme-toggle';
 import { BRAND } from '@/lib/brand';
 import { cn } from '@/lib/utils';
 import { useSyncStore } from '@/lib/sync-store';
 
-export type AppView = 'notes' | 'ask' | 'tags' | 'trash';
+export type AppView = 'notes' | 'ask' | 'tags' | 'trash' | 'settings';
 
 const NAV_ITEMS: { key: AppView; label: string }[] = [
   { key: 'notes', label: '笔记' },
   { key: 'ask', label: '问答' },
   { key: 'tags', label: '标签' },
   { key: 'trash', label: '回收站' },
+  { key: 'settings', label: '设置' },
 ];
 
 interface AppHeaderProps {
@@ -38,12 +36,9 @@ interface AppHeaderProps {
 
 export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps) {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
-  const syncOpen = useSyncStore((s) => s.panelOpen);
-  const setSyncOpen = useSyncStore((s) => s.setPanelOpen);
   const syncStatus = useSyncStore((s) => s.status);
   const pendingCount = useSyncStore((s) => s.pendingCount);
   const offlineMode = useSyncStore((s) => s.offlineMode);
-  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
@@ -91,12 +86,12 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
           </div>
         </nav>
 
-        {/* 右侧：同步状态 + 主题切换 + 本地模式徽章 */}
+        {/* 右侧：同步状态（跳转设置页）+ 退出登录 */}
         <div className="ml-auto flex items-center gap-2 sm:ml-3">
           <button
             type="button"
-            aria-label={offlineMode ? '同步：离线模式，点击打开同步面板' : '同步状态，点击打开同步面板'}
-            onClick={() => setSyncOpen(!syncOpen)}
+            aria-label={offlineMode ? '同步：离线模式，点击打开设置' : '同步状态，点击打开设置'}
+            onClick={() => onViewChange('settings')}
             className={cn(
               'relative inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9',
               offlineMode && 'text-amber-600 dark:text-amber-500'
@@ -118,28 +113,6 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
               </span>
             )}
           </button>
-          <Badge
-            variant="outline"
-            className="hidden md:inline-flex border-primary/30 text-primary"
-          >
-            {BRAND.localModeBadge}
-          </Badge>
-          <Badge
-            variant="outline"
-            className="border-primary/30 text-primary md:hidden"
-          >
-            {BRAND.localModeBadgeShort}
-          </Badge>
-          {/* AI 模型设置 */}
-          <button
-            type="button"
-            aria-label="AI 模型配置"
-            aria-haspopup="dialog"
-            onClick={() => setAiSettingsOpen(true)}
-            className="inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9"
-          >
-            <Settings2 className="size-[18px]" aria-hidden="true" />
-          </button>
           {/* 退出登录 */}
           <button
             type="button"
@@ -149,10 +122,8 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
           >
             <LogOut className="size-[18px]" aria-hidden="true" />
           </button>
-          <ThemeToggle />
         </div>
       </div>
-      <AiSettingsDialog open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
       {backgroundTask && (
         <div
           role="status"

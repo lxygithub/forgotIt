@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ClipboardPaste, PenLine } from 'lucide-react';
+import { ClipboardPaste, Loader2, PenLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { AppFooter } from '@/components/forgotit/app-footer';
@@ -10,12 +10,18 @@ import { AppHeader, type AppView } from '@/components/forgotit/app-header';
 import { AskView } from '@/components/forgotit/ask-view';
 import { NotesView, type NotesFilter } from '@/components/forgotit/notes-view';
 import { NoteEditor } from '@/components/forgotit/note-editor';
-import { SyncPanel } from '@/components/forgotit/sync-panel';
+import { SettingsView } from '@/components/forgotit/settings-view';
 import { TagsView } from '@/components/forgotit/tags-view';
 import { TrashView } from '@/components/forgotit/trash-view';
 import { BRAND } from '@/lib/brand';
 import { getAiConfig, getNote, type NoteDto, type TagWithCount } from '@/lib/api';
-import { extractFromClipboard, isEditableTarget, quickCapture } from '@/lib/clipboard-capture';
+import {
+  extractFromClipboard,
+  isEditableTarget,
+  quickCapture,
+  readClipboardContent,
+  type CapturedContent,
+} from '@/lib/clipboard-capture';
 import { useSyncStore } from '@/lib/sync-store';
 
 const INITIAL_FILTER: NotesFilter = { q: '', type: 'all', pinned: false, tag: null, mode: 'keyword' };
@@ -46,7 +52,9 @@ export default function Home() {
 
   // ---------- 剪贴板快记（任意位置 Ctrl+V 直接成笔记） ----------
   const [aiReady, setAiReady] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const capturingRef = useRef(false);
+  const readingClipboardRef = useRef(false);
 
   // 探测 AI 是否已配置（决定粘贴后是否自动 AI 解析；窗口重新聚焦时刷新）
   useEffect(() => {
@@ -68,49 +76,77 @@ export default function Home() {
     };
   }, []);
 
+  const captureClipboardContent = useCallback((captured: CapturedContent) => {
+    if (capturingRef.current) return;
+    capturingRef.current = true;
+    setCapturing(true);
+    const offline = useSyncStore.getState().offlineMode;
+    const willOrganize = aiReady && !offline;
+    const toastId = toast.loading(
+      captured.imageFiles.length > 0 ? '正在看图记下…' : '正在记下剪贴板内容…'
+    );
+    quickCapture(captured, aiReady)
+      .then((result) => {
+        if (result.organizeLevel === 'device') {
+          toast.success('已记下，设备上的 AI 也整理好了。', { id: toastId });
+        } else if (result.organizeLevel === 'server') {
+          toast.success('已记下，AI 也整理好了。', { id: toastId });
+        } else if (willOrganize) {
+          toast.warning('已记下，但 AI 整理没成功，稍后可在笔记里重新整理。', { id: toastId });
+        } else {
+          toast.success(offline ? '已先记在本地，联网后自动同步。' : '已记下。', { id: toastId });
+        }
+        if (result.ocrUsed) {
+          toast.info('图里的文字已经识别进正文了。');
+        }
+        if (result.failedImages > 0) {
+          toast.warning(`${result.failedImages} 张图片没能存上${offline ? '（离线暂不支持图片）' : ''}`);
+        }
+        bumpRefresh();
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : '粘贴记录失败，请重试', { id: toastId });
+      })
+      .finally(() => {
+        capturingRef.current = false;
+        setCapturing(false);
+      });
+  }, [aiReady, bumpRefresh]);
+
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       // 输入控件内放行原生粘贴（搜索框/问答框不受影响）
-      if (isEditableTarget(e.target)) return;
-      if (capturingRef.current) return;
+      if (isEditableTarget(e.target) || capturingRef.current || readingClipboardRef.current) return;
       const captured = extractFromClipboard(e.clipboardData);
       if (!captured) return; // 剪贴板无可用内容
       e.preventDefault();
-      capturingRef.current = true;
-      const offline = useSyncStore.getState().offlineMode;
-      const willOrganize = aiReady && !offline;
-      const toastId = toast.loading(
-        captured.imageFiles.length > 0 ? '正在看图记下…' : '正在记下剪贴板内容…'
-      );
-      quickCapture(captured, aiReady)
-        .then((result) => {
-          if (result.organizeLevel === 'device') {
-            toast.success('已记下，设备上的 AI 也整理好了。', { id: toastId });
-          } else if (result.organizeLevel === 'server') {
-            toast.success('已记下，AI 也整理好了。', { id: toastId });
-          } else if (willOrganize) {
-            toast.warning('已记下，但 AI 整理没成功，稍后可在笔记里重新整理。', { id: toastId });
-          } else {
-            toast.success(offline ? '已先记在本地，联网后自动同步。' : '已记下。', { id: toastId });
-          }
-          if (result.ocrUsed) {
-            toast.info('图里的文字已经识别进正文了。');
-          }
-          if (result.failedImages > 0) {
-            toast.warning(`${result.failedImages} 张图片没能存上${offline ? '（离线暂不支持图片）' : ''}`);
-          }
-          bumpRefresh();
-        })
-        .catch((err) => {
-          toast.error(err instanceof Error ? err.message : '粘贴记录失败，请重试', { id: toastId });
-        })
-        .finally(() => {
-          capturingRef.current = false;
-        });
+      captureClipboardContent(captured);
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  }, [aiReady, bumpRefresh]);
+  }, [captureClipboardContent]);
+
+  const handleMobilePaste = async () => {
+    if (capturingRef.current || readingClipboardRef.current) return;
+    readingClipboardRef.current = true;
+    setCapturing(true);
+    try {
+      const captured = await readClipboardContent();
+      if (!captured) {
+        toast.info('剪贴板里没有可记下的文字或图片。');
+        setCapturing(false);
+        return;
+      }
+      // captureClipboardContent 会接管 loading 状态，并在保存结束后解除。
+      setCapturing(false);
+      captureClipboardContent(captured);
+    } catch (err) {
+      toast.error(err instanceof Error ? `无法读取剪贴板：${err.message}` : '无法读取剪贴板，请检查浏览器权限。');
+      setCapturing(false);
+    } finally {
+      readingClipboardRef.current = false;
+    }
+  };
 
   // 快记提示浮条：首次进笔记视图展示一次（localStorage 记忆，8s 自动消失；触屏无键盘场景隐藏）
   const [notesHint, setNotesHint] = useState(false);
@@ -193,12 +229,15 @@ export default function Home() {
               <TrashView refreshKey={combinedRefresh} />
             </motion.div>
           )}
+          {view === 'settings' && (
+            <motion.div key="settings" {...viewMotionProps}>
+              <SettingsView />
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
       <AppFooter />
-
-      <SyncPanel />
 
       {/* 新建笔记 FAB（仅笔记视图） + 快记提示 */}
       <AnimatePresence>
@@ -214,6 +253,27 @@ export default function Home() {
           >
             <ClipboardPaste className="size-3.5" />
             随时 Ctrl+V 粘贴，直接记下
+          </motion.div>
+        )}
+        {view === 'notes' && (
+          <motion.div
+            key="mobile-paste"
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.85 }}
+            transition={{ duration: 0.18 }}
+            className="fixed bottom-20 left-4 z-40 md:hidden"
+          >
+            <Button
+              size="lg"
+              aria-label="从剪贴板记下新笔记"
+              className="h-14 rounded-full px-4 shadow-lg"
+              onClick={() => void handleMobilePaste()}
+              disabled={capturing}
+            >
+              {capturing ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <ClipboardPaste className="size-5" aria-hidden="true" />}
+              {capturing ? '正在记下' : '粘贴记下'}
+            </Button>
           </motion.div>
         )}
         {view === 'notes' && (

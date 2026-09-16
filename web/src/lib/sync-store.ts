@@ -15,6 +15,13 @@ const LS_DEVICE_ID = 'forgotit.deviceId';
 const LS_OUTBOX = 'forgotit.outbox';
 const LS_CURSOR = 'forgotit.pullCursor';
 const LS_OFFLINE = 'forgotit.offlineMode';
+const LS_SYNC_INTERVAL_MINUTES = 'forgotit.syncIntervalMinutes';
+
+export const DEFAULT_SYNC_INTERVAL_MINUTES = 5;
+const MIN_SYNC_INTERVAL_MINUTES = 1;
+const MAX_SYNC_INTERVAL_MINUTES = 60;
+
+let syncTimer: ReturnType<typeof setInterval> | null = null;
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline';
 
@@ -29,15 +36,15 @@ interface SyncState {
   status: SyncStatus;
   pendingCount: number;
   lastSyncAt: string | null;
+  syncIntervalMinutes: number;
   conflicts: ConflictDto[];
   overlay: Record<string, LocalOverlayEntry>;
   dataVersion: number; // 服务端数据变更计数（驱动列表刷新）
-  panelOpen: boolean;
   initialized: boolean;
 
   init: () => void;
   setOfflineMode: (on: boolean) => void;
-  setPanelOpen: (open: boolean) => void;
+  setSyncIntervalMinutes: (minutes: number) => number;
   setOverlayEntry: (note: NoteDto, dirty: boolean) => void;
   clearOverlayEntry: (id: string) => void;
   enqueue: (change: SyncPushChange) => void;
@@ -70,6 +77,21 @@ function readOutbox(): SyncPushChange[] {
 
 function writeOutbox(changes: SyncPushChange[]): void {
   localStorage.setItem(LS_OUTBOX, JSON.stringify(changes.slice(-100)));
+}
+
+function normalizeSyncIntervalMinutes(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_SYNC_INTERVAL_MINUTES;
+  return Math.min(MAX_SYNC_INTERVAL_MINUTES, Math.max(MIN_SYNC_INTERVAL_MINUTES, Math.round(value)));
+}
+
+function readSyncIntervalMinutes(): number {
+  const raw = Number(localStorage.getItem(LS_SYNC_INTERVAL_MINUTES));
+  return raw ? normalizeSyncIntervalMinutes(raw) : DEFAULT_SYNC_INTERVAL_MINUTES;
+}
+
+function schedulePeriodicSync(syncNow: () => Promise<void>, minutes: number): void {
+  if (syncTimer) clearInterval(syncTimer);
+  syncTimer = setInterval(() => void syncNow(), minutes * 60_000);
 }
 
 function makeLocalNote(partial: Partial<NoteDto> & { id: string }): NoteDto {
@@ -117,16 +139,17 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   status: 'idle',
   pendingCount: 0,
   lastSyncAt: null,
+  syncIntervalMinutes: DEFAULT_SYNC_INTERVAL_MINUTES,
   conflicts: [],
   overlay: {},
   dataVersion: 0,
-  panelOpen: false,
   initialized: false,
 
   init: () => {
     if (get().initialized || typeof window === 'undefined') return;
     const deviceId = getDeviceId();
     const offlineMode = localStorage.getItem(LS_OFFLINE) === '1';
+    const syncIntervalMinutes = readSyncIntervalMinutes();
     const overlay: Record<string, LocalOverlayEntry> = {};
     // 恢复未同步的本地草稿（服务端没有、推送失败留下的）
     for (const change of readOutbox()) {
@@ -137,12 +160,12 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         };
       }
     }
-    set({ deviceId, offlineMode, overlay, pendingCount: readOutbox().length, initialized: true });
+    set({ deviceId, offlineMode, syncIntervalMinutes, overlay, pendingCount: readOutbox().length, initialized: true });
 
-    // 同步触发：启动时 / 网络恢复 / 定时（文档 6.5）
+    // 同步触发：启动时 / 网络恢复 / 定时（默认每 5 分钟，可在设置中调整）
     void get().syncNow();
     window.addEventListener('online', () => void get().syncNow());
-    setInterval(() => void get().syncNow(), 30_000);
+    schedulePeriodicSync(get().syncNow, syncIntervalMinutes);
   },
 
   setOfflineMode: (on) => {
@@ -151,9 +174,12 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     if (!on) void get().syncNow();
   },
 
-  setPanelOpen: (open) => {
-    set({ panelOpen: open });
-    if (open) void get().refreshConflicts();
+  setSyncIntervalMinutes: (minutes) => {
+    const next = normalizeSyncIntervalMinutes(minutes);
+    localStorage.setItem(LS_SYNC_INTERVAL_MINUTES, String(next));
+    set({ syncIntervalMinutes: next });
+    if (get().initialized) schedulePeriodicSync(get().syncNow, next);
+    return next;
   },
 
   setOverlayEntry: (note, dirty) => {
