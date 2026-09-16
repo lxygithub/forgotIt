@@ -15,7 +15,8 @@ export function AppFooter() {
           <span className="text-sm font-semibold">{BRAND.appName}</span>
           <span className="text-xs text-muted-foreground">· {BRAND.slogan}</span>
         </div>
-        <div className="flex flex-col items-center gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+        {/* sm:pr-24 给悬浮 FAB（fixed bottom-6 right-6）让位，避免遮挡右侧徽章 */}
+        <div className="flex flex-col items-center gap-1.5 sm:flex-row sm:items-center sm:gap-3 sm:pr-24">
           <span className="text-xs text-muted-foreground">{BRAND.tagline}</span>
           <Badge variant="outline" className="border-primary/30 text-primary">
             {BRAND.localModeBadge}
