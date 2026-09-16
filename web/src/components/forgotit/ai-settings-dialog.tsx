@@ -40,6 +40,7 @@ import {
   type AiTestResultDto,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { OnDeviceSettingsSection } from '@/components/forgotit/ondevice-settings-section';
 
 const SOURCE_META: Record<AiConfigSourceDto, { label: string; className: string; hint: string }> = {
   db: {
@@ -309,6 +310,9 @@ export function AiSettingsDialog({ open, onOpenChange }: AiSettingsDialogProps) 
                 />
               </div>
             </div>
+
+            {/* 端侧 AI（三级降级链第一级：设备内推理） */}
+            <OnDeviceSettingsSection />
 
             {/* 测试结果 */}
             {testResult && (

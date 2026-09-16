@@ -21,12 +21,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Markdown } from '@/components/forgotit/markdown';
 import { BRAND } from '@/lib/brand';
 import {
-  aiOrganize,
   uploadAttachment,
   type AttachmentDto,
   type NoteDto,
   type NoteType,
 } from '@/lib/api';
+import { organizeWithInputBestEffort } from '@/lib/organize-orchestrator';
 import { createNoteLocalFirst, deleteNoteLocalFirst, updateNoteLocalFirst } from '@/lib/local-first';
 import { useSyncStore } from '@/lib/sync-store';
 
@@ -146,8 +146,18 @@ export function NoteEditor({ open, note, onOpenChange, onSaved }: NoteEditorProp
           toast.warning('离线状态下 AI 不可用。笔记已存好，联网后可再让 AI 整理。', { id: toastId });
         } else {
           toast.loading(BRAND.organizeLoadingToast, { id: toastId });
-          await aiOrganize(saved.id);
-          toast.success(BRAND.organizeDoneToast, { id: toastId });
+          // 三级降级：端侧 WebLLM → 服务端 AI → 静默（标题已有则不受影响）
+          const attempt = await organizeWithInputBestEffort(saved.id, {
+            title: saved.title,
+            content: saved.content,
+          });
+          if (attempt.level === 'device') {
+            toast.success('已保存，设备上的 AI 也整理好了。', { id: toastId });
+          } else if (attempt.level === 'server') {
+            toast.success(BRAND.organizeDoneToast, { id: toastId });
+          } else {
+            toast.warning('笔记已保存，但 AI 整理没成功，稍后可重试。', { id: toastId });
+          }
         }
       } else {
         toast.success(offline ? '已存进脑子（本地）。' : '已保存。', { id: toastId });

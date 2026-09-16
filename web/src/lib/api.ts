@@ -177,6 +177,25 @@ export function aiOrganize(id: string, signal?: AbortSignal): Promise<{ note: No
   return request(`/api/notes/${id}/ai-organize`, { method: 'POST', signal });
 }
 
+/** 端侧整理结果落库（v1.5 端侧 AI：推理在浏览器，这里只收结果写库重建索引） */
+export function applyOrganize(
+  id: string,
+  result: {
+    title?: string;
+    category: string;
+    tags: string[];
+    summary: string;
+    semanticKeywords: string[];
+  },
+  signal?: AbortSignal
+): Promise<{ note: NoteDto; appliedTitle: boolean }> {
+  return request(`/api/notes/${id}/apply-organize`, {
+    method: 'POST',
+    body: JSON.stringify(result),
+    signal,
+  });
+}
+
 // ---------- AI ----------
 
 export function aiAsk(question: string, signal?: AbortSignal): Promise<AskResult> {

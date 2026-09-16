@@ -78,12 +78,17 @@ export default function Home() {
       );
       quickCapture(captured, aiReady)
         .then((result) => {
-          if (result.organized) {
+          if (result.organizeLevel === 'device') {
+            toast.success('已记下，设备上的 AI 也整理好了。', { id: toastId });
+          } else if (result.organizeLevel === 'server') {
             toast.success('已记下，AI 也整理好了。', { id: toastId });
           } else if (willOrganize) {
             toast.warning('已记下，但 AI 整理没成功，稍后可在笔记里重新整理。', { id: toastId });
           } else {
             toast.success(offline ? '已先记在本地，联网后自动同步。' : '已记下。', { id: toastId });
+          }
+          if (result.ocrUsed) {
+            toast.info('图里的文字已经识别进正文了。');
           }
           if (result.failedImages > 0) {
             toast.warning(`${result.failedImages} 张图片没能存上${offline ? '（离线暂不支持图片）' : ''}`);
