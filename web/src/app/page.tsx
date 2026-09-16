@@ -257,38 +257,36 @@ export default function Home() {
         )}
         {view === 'notes' && (
           <motion.div
-            key="mobile-paste"
+            key="mobile-actions"
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
             transition={{ duration: 0.18 }}
-            className="fixed bottom-20 left-4 z-40 md:hidden"
+            className="fixed bottom-20 right-4 z-40 flex flex-col items-end gap-2 md:bottom-6 md:right-6"
           >
+            <Button
+              variant="outline"
+              aria-label="记一条新笔记"
+              className="h-10 rounded-full bg-card/95 px-3 text-sm shadow-md backdrop-blur md:hidden"
+              onClick={openNewNote}
+            >
+              <PenLine className="size-4" aria-hidden="true" />
+              记一条
+            </Button>
             <Button
               size="lg"
               aria-label="从剪贴板记下新笔记"
-              className="h-14 rounded-full px-4 shadow-lg"
+              className="h-14 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90 md:hidden"
               onClick={() => void handleMobilePaste()}
               disabled={capturing}
             >
               {capturing ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <ClipboardPaste className="size-5" aria-hidden="true" />}
               {capturing ? '正在记下' : '粘贴记下'}
             </Button>
-          </motion.div>
-        )}
-        {view === 'notes' && (
-          <motion.div
-            key="fab"
-            initial={{ opacity: 0, scale: 0.85 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.85 }}
-            transition={{ duration: 0.18 }}
-            className="fixed bottom-20 right-6 z-40 md:bottom-6"
-          >
             <Button
               size="lg"
               aria-label="记一条新笔记"
-              className="h-14 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90"
+              className="hidden h-14 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90 md:inline-flex"
               onClick={openNewNote}
             >
               <PenLine className="size-5" aria-hidden="true" />

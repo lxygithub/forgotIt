@@ -1,8 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { BrainCircuit, Palette, Settings2 } from 'lucide-react';
+import { BrainCircuit, LogOut, Palette, Settings2 } from 'lucide-react';
+import { signOut } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { AiSettingsDialog } from '@/components/forgotit/ai-settings-dialog';
 import { SyncSettingsSection } from '@/components/forgotit/sync-panel';
 import { ThemeToggle } from '@/components/forgotit/theme-toggle';
@@ -10,6 +21,7 @@ import { ThemeToggle } from '@/components/forgotit/theme-toggle';
 /** 应用设置：将同步、AI 与外观配置集中在一个可返回的页面中。 */
 export function SettingsView() {
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   return (
     <section aria-label="设置" className="mx-auto max-w-2xl space-y-8">
@@ -62,7 +74,37 @@ export function SettingsView() {
         </div>
       </section>
 
+      <section className="border-t pt-6" aria-label="账户操作">
+        <Button
+          variant="ghost"
+          className="h-11 w-full text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-9"
+          onClick={() => setLogoutConfirmOpen(true)}
+        >
+          <LogOut className="size-4" aria-hidden="true" />
+          退出登录
+        </Button>
+      </section>
+
       <AiSettingsDialog open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
+      <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <AlertDialogContent className="max-w-sm p-5 sm:p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认退出登录？</AlertDialogTitle>
+            <AlertDialogDescription>
+              退出后需要重新输入密码才能访问你的笔记。本机缓存不会因此删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-11 sm:h-9">取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-11 bg-destructive text-white hover:bg-destructive/90 sm:h-9"
+              onClick={() => void signOut({ callbackUrl: '/login' })}
+            >
+              退出登录
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

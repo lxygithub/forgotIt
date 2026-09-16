@@ -1,18 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { Brain, CloudOff, Loader2, LogOut, RefreshCw } from 'lucide-react';
-import { signOut } from 'next-auth/react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { Brain, CloudOff, Loader2, RefreshCw, Settings2 } from 'lucide-react';
 import { BRAND } from '@/lib/brand';
 import { cn } from '@/lib/utils';
 import { useSyncStore } from '@/lib/sync-store';
@@ -24,7 +12,6 @@ const NAV_ITEMS: { key: AppView; label: string }[] = [
   { key: 'ask', label: '问答' },
   { key: 'tags', label: '标签' },
   { key: 'trash', label: '回收站' },
-  { key: 'settings', label: '设置' },
 ];
 
 interface AppHeaderProps {
@@ -35,7 +22,6 @@ interface AppHeaderProps {
 }
 
 export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps) {
-  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const syncStatus = useSyncStore((s) => s.status);
   const pendingCount = useSyncStore((s) => s.pendingCount);
   const offlineMode = useSyncStore((s) => s.offlineMode);
@@ -86,7 +72,7 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
           </div>
         </nav>
 
-        {/* 右侧：同步状态（跳转设置页）+ 退出登录 */}
+        {/* 右侧：同步状态 + 设置 */}
         <div className="ml-auto flex items-center gap-2 sm:ml-3">
           <button
             type="button"
@@ -113,14 +99,17 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
               </span>
             )}
           </button>
-          {/* 退出登录 */}
           <button
             type="button"
-            aria-label={BRAND.logoutAria}
-            onClick={() => setLogoutConfirmOpen(true)}
-            className="inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9"
+            aria-label="打开设置"
+            aria-current={view === 'settings' ? 'page' : undefined}
+            onClick={() => onViewChange('settings')}
+            className={cn(
+              'inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9',
+              view === 'settings' && 'bg-accent text-accent-foreground'
+            )}
           >
-            <LogOut className="size-[18px]" aria-hidden="true" />
+            <Settings2 className="size-[18px]" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -136,25 +125,6 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
           </div>
         </div>
       )}
-      <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
-        <AlertDialogContent className="max-w-sm p-5 sm:p-6">
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认退出登录？</AlertDialogTitle>
-            <AlertDialogDescription>
-              退出后需要重新输入密码才能访问你的笔记。本机缓存不会因此删除。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-11 sm:h-9">取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="h-11 bg-destructive text-white hover:bg-destructive/90 sm:h-9"
-              onClick={() => void signOut({ callbackUrl: '/login' })}
-            >
-              退出登录
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </header>
   );
 }
