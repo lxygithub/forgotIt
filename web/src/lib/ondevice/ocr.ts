@@ -5,10 +5,16 @@
 // 用途：粘贴/上传图片时在**设备内**提取文字（印刷体），配合端侧整理或
 // 作为正文素材；服务端 VLM 的「看图写描述」能力仍由服务端链路兜底。
 //
-// 成本说明：中文语言包（chi_sim，约 20MB）首次使用时下载并缓存于浏览器，
-// 之后离线可用。worker 单例复用，识别完不销毁（连续贴图场景免重复初始化）。
+// 成本说明：中文语言包（chi_sim best_int，约 20-40MB）首次使用时下载并缓存
+// 于浏览器，之后离线可用。worker 单例复用，识别完不销毁（连续贴图场景免
+// 重复初始化）。
+//
+// 打包约束：tesseract.js 主线程库与其 core WASM（约 44MB）必须留在构建图外，
+// 一律经 assets.ts 运行时 URL 加载；worker/core/语言包在生产环境全部走
+// 同源 R2（/api/ai-assets/*），本地开发回落官方 CDN。
 
 import { getEngineState } from './engine';
+import { loadTesseract, ocrWorkerPaths } from './assets';
 
 export type OcrPhase = 'idle' | 'initializing' | 'recognizing' | 'done' | 'error';
 
@@ -45,8 +51,12 @@ async function ensureTesseractWorker(): Promise<import('tesseract.js').Worker> {
 
   initPromise = (async () => {
     setState({ phase: 'initializing', progress: 0, error: undefined });
-    const { createWorker } = await import('tesseract.js');
+    // 运行时 URL import：tesseract.js 主线程库不进 bundle
+    const { createWorker } = await loadTesseract();
     const worker = await createWorker('chi_sim+eng', 1, {
+      // self 模式：worker 脚本 / core WASM / 语言包全部同源 R2；
+      // cdn 模式传 undefined，回落 tesseract 官方 CDN 默认值
+      ...ocrWorkerPaths(),
       logger: (m) => {
         if (m.progress !== undefined) setState({ progress: Math.min(1, Math.max(0, m.progress)) });
       },

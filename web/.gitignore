@@ -28,6 +28,9 @@ public/uploads/
 # cloudflare workers (双部署，v1.3)
 .wrangler/
 .open-next/
+
+# 端侧 AI 资产上传缓存（scripts/upload-ai-assets.mjs）
+.ai-assets-cache/
 .dev.vars
 
 # Workers 专用 Prisma 客户端（bun run build:cf 自动生成）

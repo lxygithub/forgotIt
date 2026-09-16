@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { disposeEngine, ensureReady, getEngineState, probeWebGpu, subscribeEngine, type EngineState } from '@/lib/ondevice/engine';
+import { loadWebllm, selfHostedAppConfig } from '@/lib/ondevice/assets';
 import {
   getOnDeviceModelId,
   getOnDevicePrefs,
@@ -111,8 +112,10 @@ export function OnDeviceSettingsSection() {
     setClearing(true);
     try {
       disposeEngine();
-      const webllm = await import('@mlc-ai/web-llm');
-      await webllm.deleteModelAllInfoInCache(modelId);
+      const webllm = await loadWebllm();
+      // 传入 selfHostedAppConfig：self 模式下缓存键基于 R2 地址，需按同一份
+      // 配置查找；cdn 模式返回 undefined，走官方预置（HuggingFace 地址）
+      await webllm.deleteModelAllInfoInCache(modelId, selfHostedAppConfig(webllm));
       toast.success('已清理该模型的本地缓存。');
     } catch (err) {
       toast.error(err instanceof Error ? `清理失败：${err.message}` : '清理失败');

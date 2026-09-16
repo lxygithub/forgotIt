@@ -10,6 +10,10 @@ import { getCloudflareContext } from '@opennextjs/cloudflare/cloudflare-context'
 export interface R2ObjectLike {
   body: ReadableStream<Uint8Array>;
   httpMetadata?: { contentType?: string };
+  /** 对象字节数（/api/ai-assets 依赖它回 Content-Length，供下载进度计算） */
+  size?: number;
+  /** R2 返回的 HTTP 形态 ETag（弱验证用，可缺省） */
+  httpEtag?: string;
 }
 
 export interface R2BucketLike {

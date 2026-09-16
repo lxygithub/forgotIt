@@ -411,6 +411,56 @@ Workers 部署用 `bunx wrangler secret put ZAI_BASE_URL / ZAI_API_KEY` 设置�
 | 语义/混合搜索 | ⚠️ 查询扩展与向量索引构建依赖 LLM，无凭证时基本无结果 |
 | 种子示例数据 | ✅ 正常 |
 
+### 5.5 端侧资源自托管 R2（v1.5.1 起，**部署必需**）
+
+**为什么必须有这一节**：端侧依赖的库与模型体积巨大——`@mlc-ai/web-llm`（ESM ≈ 6.6MB）、
+`tesseract.js-core`（6 个 WASM 变体 ≈ 44MB）、Qwen 权重（0.5-2GB）。v1.5.0 曾把它们打进
+Next 的 SSR 构建图，OpenNext 一并塞进 Worker bundle，触发 **Cloudflare Workers 64MiB
+未压缩上限（error 10027）导致部署失败**。v1.5.1 起的架构约定：
+
+1. **零打包**：这些包已移入 `devDependencies`（仅提供类型），代码一律经
+   `src/lib/ondevice/assets.ts` 用 `new Function('return import(url)')` 在浏览器运行时加载，
+   bundler 无法静态分析，构建产物对它们保持零引用；
+2. **全部走 R2**：复用 `forgotit-uploads` 桶（`BUCKET` 绑定），key 前缀 `ai-assets/v1/`，
+   由同源路由 **`/api/ai-assets/*`**（`src/app/api/ai-assets/[...path]/route.ts`）提供——
+   R2 对象体流式转发（不进内存）、按扩展名回 MIME、`immutable` 缓存一年、免鉴权（纯公共模型文件）；
+3. **上传一次，永久可用**：资产是静态文件，与部署流水线无关。
+
+**R2 key 布局**（与 `assets.ts` 的 self 模式地址一一对应）：
+
+| R2 key（`ai-assets/v1/…`） | 内容 | 来源 |
+| --- | --- | --- |
+| `tesseract/worker.min.js`、`tesseract/tesseract.esm.min.js` | Tesseract 主线程库 + worker 脚本 | node_modules/tesseract.js/dist |
+| `tesseract-core/*`（12 个文件） | OCR WASM 6 变体（.wasm + .wasm.js 胶水） | node_modules/tesseract.js-core |
+| `tessdata/{chi_sim,eng}.traineddata.gz` | OCR 语言包（4.0.0_best_int，与 oem=1 默认一致） | jsdelivr @tesseract.js-data |
+| `webllm/lib/index.js` | WebLLM ESM 入口 | node_modules/@mlc-ai/web-llm/lib |
+| `libs/web-llm-models/v0_2_84/base/*.wasm` | 三个 Qwen 档位的 model_lib | GitHub raw（binary-mlc-llm-libs） |
+| `hf/mlc-ai/Qwen2.5-{0.5B,1.5B,3B}-Instruct-q4f16_1-MLC/*` | 权重 shard + config + tokenizer（≈3.5GB） | HuggingFace |
+
+**上传命令**（凭证二选一：`export CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=…` 或 `bunx wrangler login`）：
+
+```bash
+cd web
+bun run upload:ai-assets              # 全量 ≈3.5GB（幂等，断点续传，清单 .ai-assets-cache/uploaded.json）
+bun run upload:ai-assets --tesseract  # 只传 OCR 部分 ≈70MB（想先快速验收端侧 OCR 时用）
+bun run upload:ai-assets --models=0.5b,1.5b  # 只传部分模型权重
+```
+
+**部署验收**（资产未上传前端侧功能会报错并自动回落服务端，不影响其余功能）：
+
+```bash
+curl -sI https://forgotit.<account>.workers.dev/api/ai-assets/v1/webllm/lib/index.js | head -3
+# 200 + Content-Type: text/javascript = 就绪；404 = 尚未上传；503 = R2 binding 异常
+```
+
+**升级模型/库版本**：把 `assets.ts` 的 `R2_PREFIX` 与上传脚本的 `VERSION` 同步从 `v1` 升到 `v2`
+并重跑上传（旧版本对象可留可删），浏览器侧 immutable 缓存因此可以放心开一年。
+
+**本地开发回退（cdn 模式）**：`next dev` 下默认走官方 CDN（jsdelivr + HuggingFace，即两个库
+的出厂行为），无需 R2；如需强制可用 `NEXT_PUBLIC_ONDEVICE_ASSET_SOURCE=self|cdn` 覆盖。
+生产构建恒为 self 模式。另有 `next.config.ts` 的 `outputFileTracingExcludes` 兜底，
+把这几个包挡在文件追踪清单外（双保险）。
+
 ---
 
 ## 6. 数据库运维

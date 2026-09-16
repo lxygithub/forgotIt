@@ -4,14 +4,22 @@
 //
 // 职责：
 //   - WebGPU 能力探测（不支持 → 上层直接走服务端，端侧静默缺席）
-//   - 模型懒加载：首次点「启用端侧 AI」才 new Worker + 下载权重（Cache API 持久化）
+//   - 模型懒加载：首次点「启用端侧 AI」才建 Worker + 下载权重（Cache API 持久化）
 //   - generate()：单条文本生成（整理任务用），串行化 + 超时兜底
 //   - 状态 pub/sub：设置 UI 与编排层订阅同一份状态
 //
 // 不做的事（有意为之）：
-//   - 不把 @mlc-ai/web-llm 打进首屏：只在 ensureReady() 时动态 import
+//   - 不把 @mlc-ai/web-llm 打进任何 bundle：库代码经 assets.ts 用运行时 URL
+//     动态 import（new Function），Worker 引导脚本也是运行时生成的 Blob——
+//     web-llm（6.6MB ESM）与模型权重（0.5-2GB）全部自托管于 R2（生产）或
+//     官方 CDN（本地开发），见 assets.ts 顶部说明
 //   - 不做流式输出：整理任务是「算完再入库」，非流式更简单可控
 
+import {
+  loadWebllm,
+  selfHostedAppConfig,
+  webllmEsmUrl,
+} from './assets';
 import { getOnDeviceModelId, type OnDeviceModelId } from './prefs';
 
 export type EngineStatus = 'unsupported' | 'idle' | 'loading' | 'ready' | 'error';
@@ -64,12 +72,30 @@ export async function probeWebGpu(): Promise<boolean> {
 
 interface LoadedEngine {
   worker: Worker;
+  /** Blob Worker 的 objectURL，dispose 时释放 */
+  workerUrl: string;
   engine: import('@mlc-ai/web-llm').MLCEngineInterface;
   modelId: OnDeviceModelId;
 }
 
 let loaded: LoadedEngine | null = null;
 let ensurePromise: Promise<void> | null = null;
+
+/**
+ * 运行时生成引擎 Worker（Blob 模块 Worker）：
+ * worker 内静态 import 自托管/CDN 的 web-llm ESM，再用官方
+ * WebWorkerMLCEngineHandler 模式接线——与编译期 worker 文件（原 ./worker.ts）
+ * 行为等价，但库代码完全不进入 Next 构建图。
+ * 模块 Worker 的消息会等模块图求值完成才开始派发，握手时序安全。
+ */
+function createEngineWorker(): { worker: Worker; url: string } {
+  const bootstrap =
+    `import { WebWorkerMLCEngineHandler } from ${JSON.stringify(webllmEsmUrl())};\n` +
+    `const handler = new WebWorkerMLCEngineHandler();\n` +
+    `self.onmessage = (msg) => { handler.onmessage(msg); };\n`;
+  const url = URL.createObjectURL(new Blob([bootstrap], { type: 'text/javascript' }));
+  return { worker: new Worker(url, { type: 'module' }), url };
+}
 
 /** 确保引擎已加载目标模型（幂等；换档位时自动 reload，权重走浏览器缓存） */
 export async function ensureReady(modelId?: OnDeviceModelId): Promise<void> {
@@ -85,12 +111,14 @@ export async function ensureReady(modelId?: OnDeviceModelId): Promise<void> {
   ensurePromise = (async () => {
     setState({ status: 'loading', modelId: target, progress: 0, progressText: '准备中…', error: undefined });
     try {
-      // 动态 import：web-llm 体积可观，绝不能进首屏 bundle
-      const webllm = await import('@mlc-ai/web-llm');
+      // 运行时 URL import：web-llm 不进 bundle（生产从同源 R2 拉，开发走 jsdelivr）
+      const webllm = await loadWebllm();
 
       if (!loaded) {
-        const worker = new Worker(new URL('./worker.ts', import.meta.url));
+        const { worker, url } = createEngineWorker();
         const engine = await webllm.CreateWebWorkerMLCEngine(worker, target, {
+          // self 模式：权重/model_lib 指向自托管 R2；cdn 模式传 undefined 走官方预置
+          appConfig: selfHostedAppConfig(webllm),
           initProgressCallback: (report) => {
             const progress = report.progress ?? 0;
             const quantized = Math.floor(progress * 100) / 100;
@@ -99,7 +127,7 @@ export async function ensureReady(modelId?: OnDeviceModelId): Promise<void> {
             }
           },
         });
-        loaded = { worker, engine, modelId: target };
+        loaded = { worker, workerUrl: url, engine, modelId: target };
       } else if (loaded.modelId !== target) {
         await loaded.engine.reload(target);
         loaded.modelId = target;
@@ -161,6 +189,7 @@ export function disposeEngine(): void {
   if (loaded) {
     void loaded.engine.unload().catch(() => undefined);
     loaded.worker.terminate();
+    URL.revokeObjectURL(loaded.workerUrl);
     loaded = null;
   }
   setState({ status: 'idle', modelId: null, progress: 0, progressText: '' });

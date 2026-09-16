@@ -16,7 +16,8 @@
     "preview:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "pg:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/pg/schema.sql",
-    "migrate:d1-to-pg": "bun scripts/migrate-d1-to-pg.mjs"
+    "migrate:d1-to-pg": "bun scripts/migrate-d1-to-pg.mjs",
+    "upload:ai-assets": "bun scripts/upload-ai-assets.mjs"
   },
   "overrides": {
     "@aws-sdk/middleware-flexible-checksums": "3.974.54"
@@ -27,7 +28,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.1.1",
     "@mdxeditor/editor": "^3.39.1",
-    "@mlc-ai/web-llm": "^0.2.85",
     "@opennextjs/cloudflare": "^1.20.6",
     "@prisma/adapter-d1": "6",
     "@prisma/adapter-pg": "6.19.3",
@@ -88,7 +88,6 @@
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
-    "tesseract.js": "^7.0.0",
     "uuid": "^11.1.0",
     "vaul": "^1.1.2",
     "z-ai-web-dev-sdk": "^0.0.18",
@@ -97,12 +96,14 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@mlc-ai/web-llm": "^0.2.85",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "bun-types": "^1.3.4",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tesseract.js": "^7.0.0",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
   }

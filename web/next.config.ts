@@ -22,6 +22,17 @@ const nextConfig: NextConfig = {
     // 单进程构建：4GB cgroup 下多 worker 并发是 OOM 主因之一（变慢换稳定）
     cpus: 1,
   },
+  // 端侧 AI 的大包（web-llm / tesseract）在运行时经 /api/ai-assets 从 R2 加载，
+  // 绝不能进任何构建图（2026-09 曾因此撑爆 Workers 64MiB 上限，见部署文档 §5.4）。
+  // 这里把它们与仅迁移用的 prisma schema 引擎从文件追踪清单剔除，双保险。
+  outputFileTracingExcludes: {
+    "*": [
+      "./node_modules/@mlc-ai/web-llm/**",
+      "./node_modules/tesseract.js/**",
+      "./node_modules/tesseract.js-core/**",
+      "./node_modules/prisma/build/**",
+    ],
+  },
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,
