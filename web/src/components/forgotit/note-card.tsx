@@ -40,8 +40,9 @@ function TagPill({ tag }: { tag: TagDto }) {
 }
 
 export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pending }: NoteCardProps) {
-  const firstImage = useMemo(
-    () => note.attachments.find((a) => a.mimeType.startsWith('image/')),
+  // 脱敏：首页卡片不展示正文/摘要/图片缩略图，仅标题 + 标签 + 时间 + 图片数角标
+  const imageCount = useMemo(
+    () => note.attachments.filter((a) => a.mimeType.startsWith('image/')).length,
     [note.attachments]
   );
 
@@ -67,17 +68,7 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
         }
       }}
     >
-      {/* 首图缩略图 */}
-      {firstImage && (
-        <div className="relative h-32 w-full overflow-hidden bg-muted">
-          <img
-            src={firstImage.filePath}
-            alt={firstImage.description || (title ? `${title} 的配图` : '笔记配图')}
-            loading="lazy"
-            className="h-32 w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-          />
-        </div>
-      )}
+      {/* （脱敏：不再展示首图缩略图与正文/摘要预览） */}
 
       {/* 悬浮操作（移动端常显） */}
       <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
@@ -135,11 +126,7 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
           </h3>
         </div>
 
-        {(note.summary || note.content) && (
-          <p className="line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
-            {note.summary?.trim() || note.content?.replace(/[#*`>\-\[\]]/g, '').trim() || ''}
-          </p>
-        )}
+        {/* （脱敏：不再展示 summary/content 预览） */}
 
         {note.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -155,9 +142,20 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
         )}
 
         <div className="mt-auto flex items-center justify-between gap-2 pt-1 text-xs text-muted-foreground">
-          <time dateTime={note.updatedAt}>
-            {formatDistanceToNow(new Date(note.updatedAt), { addSuffix: true, locale: zhCN })}
-          </time>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <time dateTime={note.updatedAt}>
+              {formatDistanceToNow(new Date(note.updatedAt), { addSuffix: true, locale: zhCN })}
+            </time>
+            {imageCount > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px]"
+                title={`含 ${imageCount} 张图片（内容已脱敏）`}
+              >
+                <ImageIcon className="size-2.5" aria-hidden="true" />
+                {imageCount}
+              </span>
+            )}
+          </span>
           {note.localOnly && (
             <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px]">
               仅本地

@@ -25,10 +25,13 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       .flatMap((a) => [a.description, a.ocrText].filter((x): x is string => Boolean(x && x.trim())))
       .slice(0, 6);
 
+    // 无标题时让 AI 顺带提炼一个（已有标题永不覆盖）
+    const needTitle = !note.title?.trim();
     const result = await aiOrganizeNote({
       title: note.title,
       content: note.content,
       imageHints,
+      needTitle,
     });
     if (!result) {
       return NextResponse.json({ error: '这篇笔记没有可整理的内容' }, { status: 400 });
@@ -61,12 +64,13 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       ],
     });
 
-    // 4. 摘要 + 语义关键词（同步索引用）
+    // 4. 摘要 + 语义关键词（同步索引用）；无标题笔记顺带写入 AI 标题
     await db.note.update({
       where: { id },
       data: {
         summary: result.summary,
         semanticKeywords: result.semanticKeywords.length > 0 ? JSON.stringify(result.semanticKeywords) : null,
+        ...(needTitle && result.title ? { title: result.title } : {}),
       },
     });
     await logSync('note', id, 'upsert');

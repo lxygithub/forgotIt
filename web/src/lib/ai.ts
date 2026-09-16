@@ -290,6 +290,7 @@ export async function llmJson<T>(system: string, user: string): Promise<{ data: 
 // ---------- 16.1 自动打标签 + 16.2 摘要 ----------
 
 export interface OrganizeResult {
+  title?: string;
   category: string;
   tags: string[];
   summary: string;
@@ -300,6 +301,8 @@ export async function aiOrganizeNote(input: {
   title?: string | null;
   content?: string | null;
   imageHints?: string[];
+  /** 笔记没有标题时置 true：让 AI 顺带提炼一个标题（已有标题永不覆盖） */
+  needTitle?: boolean;
 }): Promise<OrganizeResult | null> {
   const system = [
     '你是「记不住」记事本的整理助手，负责给笔记归类、打标签、写摘要。',
@@ -307,7 +310,10 @@ export async function aiOrganizeNote(input: {
     '自由标签 3-6 个，每个不超过 8 个字，贴合笔记主题（人物、地点、事项、物品等具体词）。',
     '摘要不超过 50 字，陈述句，不加修饰。',
     'semanticKeywords：6-10 个语义检索关键词，包含同义词、口语说法、相关概念（例如体检报告可给：健康/医院/复查/身体指标/看病/诊断/化验），不要与正文完全重复的词。',
-    '只输出一个 JSON 对象，格式：{"category":"类目名","tags":["标签1"],"summary":"摘要","semanticKeywords":["词1","词2"]}',
+    input.needTitle
+      ? '这篇笔记没有标题：请在 JSON 里加 "title" 字段，根据内容提炼一个不超过 20 字的具体标题（不要以「笔记」「记录」开头，不要泛泛而谈）。'
+      : '笔记已有标题，不要输出 title 字段。',
+    '只输出一个 JSON 对象，格式：{"category":"类目名","tags":["标签1"],"summary":"摘要","semanticKeywords":["词1","词2"]}，仅在上面要求生成标题时才额外包含 "title":"标题" 字段。',
   ].join('\n');
 
   const parts: string[] = [];
@@ -322,6 +328,13 @@ export async function aiOrganizeNote(input: {
   if (!result) return null;
   const { category, tags, summary } = result.data;
   const rawKeywords = (result.data as { semanticKeywords?: unknown }).semanticKeywords;
+  const rawTitle = (result.data as { title?: unknown }).title;
+
+  // 标题：仅 needTitle 时采纳，防 AI 越权覆盖用户已有标题
+  const safeTitle =
+    input.needTitle && typeof rawTitle === 'string' && rawTitle.trim()
+      ? rawTitle.trim().replace(/^["'「『]+|["'」』]+$/g, '').slice(0, 30)
+      : undefined;
 
   // 校验与收敛：类目必须命中固定列表，标签数量与长度受限
   const safeCategory = DEFAULT_CATEGORIES.includes(category as (typeof DEFAULT_CATEGORIES)[number])
@@ -341,6 +354,7 @@ export async function aiOrganizeNote(input: {
     : [];
 
   return {
+    title: safeTitle,
     category: safeCategory,
     tags: safeTags.length > 0 ? safeTags : ['待整理'],
     summary: safeSummary || '这篇笔记还没摘要。',
