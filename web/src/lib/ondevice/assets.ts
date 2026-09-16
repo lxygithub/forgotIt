@@ -43,10 +43,21 @@ export function selfAssetBase(): string {
  * bundler 不透明的运行时动态 import。
  * 必须用 new Function 包一层：直接写 `import(url)` 会被 webpack/turbopack 改写
  * 并把目标（或其报错）编进构建产物，破坏「零引用」约定。
+ *
+ * ⚠️ 必须惰性构造（首次调用时才 new Function）：workerd（Cloudflare Workers
+ * 运行时）禁止字符串代码生成，若在模块求值期执行，登录态主页 SSR 会直接
+ * EvalError → 500（2026-09-16 生产事故）。浏览器端首次调用不受影响。
  */
-const runtimeImport = new Function('url', 'return import(url);') as (
-  url: string
-) => Promise<unknown>;
+let runtimeImport: ((url: string) => Promise<unknown>) | null = null;
+
+function getRuntimeImport(): (url: string) => Promise<unknown> {
+  if (!runtimeImport) {
+    runtimeImport = new Function('url', 'return import(url);') as (
+      url: string
+    ) => Promise<unknown>;
+  }
+  return runtimeImport;
+}
 
 // ---------------------------------------------------------------------------
 // WebLLM
@@ -63,7 +74,7 @@ export function webllmEsmUrl(): string {
 
 /** 运行时加载 web-llm（绝不能被静态 import） */
 export async function loadWebllm(): Promise<typeof import('@mlc-ai/web-llm')> {
-  return (await runtimeImport(webllmEsmUrl())) as typeof import('@mlc-ai/web-llm');
+  return (await getRuntimeImport()(webllmEsmUrl())) as typeof import('@mlc-ai/web-llm');
 }
 
 /** 本方案在 R2 自托管权重的模型（与 prefs.ts 的档位一致） */
@@ -116,7 +127,7 @@ export function tesseractEsmUrl(): string {
 
 /** 运行时加载 tesseract.js（绝不能被静态 import） */
 export async function loadTesseract(): Promise<typeof import('tesseract.js')> {
-  return (await runtimeImport(tesseractEsmUrl())) as typeof import('tesseract.js');
+  return (await getRuntimeImport()(tesseractEsmUrl())) as typeof import('tesseract.js');
 }
 
 export interface OcrAssetPaths {
