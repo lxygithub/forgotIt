@@ -27,12 +27,12 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
   const offlineMode = useSyncStore((s) => s.offlineMode);
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
+    <header className="sticky top-0 z-40 border-b border-border/70 bg-background/72 shadow-[0_1px_0_color-mix(in_oklab,var(--border)_65%,transparent)] backdrop-blur-xl">
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
         {/* Logo */}
         <div className="flex items-center gap-2">
           <span
-            className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground"
+            className="flex size-9 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),oklch(0.65_0.12_220))] text-primary-foreground shadow-[0_7px_18px_-8px_var(--primary)]"
             aria-hidden="true"
           >
             <Brain className="size-5" />
@@ -61,7 +61,7 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
                   className={cn(
                     'inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm font-medium transition-colors sm:h-9 sm:px-3.5',
                     active
-                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      ? 'bg-primary text-primary-foreground shadow-[0_5px_14px_-7px_var(--primary)]'
                       : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                   )}
                 >

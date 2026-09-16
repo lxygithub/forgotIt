@@ -44,31 +44,31 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  /* 暖纸感 + 琥珀主色（浅色） */
-  --background: oklch(0.977 0.012 85);
-  --foreground: oklch(0.27 0.02 60);
-  --card: oklch(0.994 0.004 90);
-  --card-foreground: oklch(0.27 0.02 60);
-  --popover: oklch(0.994 0.004 90);
-  --popover-foreground: oklch(0.27 0.02 60);
-  --primary: oklch(0.646 0.16 58);
-  --primary-foreground: oklch(0.99 0.01 90);
-  --secondary: oklch(0.945 0.02 85);
-  --secondary-foreground: oklch(0.414 0.112 45.904);
-  --muted: oklch(0.945 0.02 85);
-  --muted-foreground: oklch(0.5 0.025 70);
-  --accent: oklch(0.93 0.05 85);
-  --accent-foreground: oklch(0.414 0.112 45.904);
+  --radius: 0.95rem;
+  /* 清透薄荷：偏冷的留白、海盐蓝绿主色 */
+  --background: oklch(0.978 0.012 205);
+  --foreground: oklch(0.27 0.028 235);
+  --card: oklch(0.995 0.004 205 / 88%);
+  --card-foreground: oklch(0.27 0.028 235);
+  --popover: oklch(0.995 0.004 205 / 96%);
+  --popover-foreground: oklch(0.27 0.028 235);
+  --primary: oklch(0.58 0.135 184);
+  --primary-foreground: oklch(0.99 0.006 205);
+  --secondary: oklch(0.935 0.026 205);
+  --secondary-foreground: oklch(0.33 0.07 205);
+  --muted: oklch(0.946 0.015 215);
+  --muted-foreground: oklch(0.51 0.035 235);
+  --accent: oklch(0.91 0.05 188);
+  --accent-foreground: oklch(0.3 0.075 195);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.895 0.02 80);
-  --input: oklch(0.895 0.02 80);
-  --ring: oklch(0.666 0.179 58.318);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --border: oklch(0.89 0.025 210 / 80%);
+  --input: oklch(0.89 0.025 210 / 80%);
+  --ring: oklch(0.62 0.125 188);
+  --chart-1: oklch(0.62 0.15 190);
+  --chart-2: oklch(0.67 0.12 225);
+  --chart-3: oklch(0.56 0.09 255);
+  --chart-4: oklch(0.76 0.12 155);
+  --chart-5: oklch(0.7 0.14 80);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -80,30 +80,30 @@
 }
 
 .dark {
-  /* 暖褐色深色模式 */
-  --background: oklch(0.19 0.015 60);
-  --foreground: oklch(0.93 0.015 85);
-  --card: oklch(0.23 0.018 60);
-  --card-foreground: oklch(0.93 0.015 85);
-  --popover: oklch(0.23 0.018 60);
-  --popover-foreground: oklch(0.93 0.015 85);
-  --primary: oklch(0.769 0.188 70.08);
-  --primary-foreground: oklch(0.279 0.077 45.635);
-  --secondary: oklch(0.28 0.02 60);
-  --secondary-foreground: oklch(0.924 0.12 95.746);
-  --muted: oklch(0.28 0.02 60);
-  --muted-foreground: oklch(0.7 0.02 80);
-  --accent: oklch(0.32 0.03 60);
-  --accent-foreground: oklch(0.924 0.12 95.746);
+  /* 深海蓝绿：保留清透对比，避免浅色方案的暖褐色。 */
+  --background: oklch(0.19 0.025 235);
+  --foreground: oklch(0.925 0.018 205);
+  --card: oklch(0.235 0.028 230 / 88%);
+  --card-foreground: oklch(0.925 0.018 205);
+  --popover: oklch(0.235 0.028 230 / 96%);
+  --popover-foreground: oklch(0.925 0.018 205);
+  --primary: oklch(0.74 0.13 182);
+  --primary-foreground: oklch(0.21 0.045 225);
+  --secondary: oklch(0.29 0.035 230);
+  --secondary-foreground: oklch(0.86 0.055 190);
+  --muted: oklch(0.285 0.025 230);
+  --muted-foreground: oklch(0.7 0.035 210);
+  --accent: oklch(0.33 0.055 220);
+  --accent-foreground: oklch(0.89 0.05 195);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.769 0.188 70.08);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --border: oklch(0.7 0.03 215 / 20%);
+  --input: oklch(0.7 0.03 215 / 22%);
+  --ring: oklch(0.74 0.13 182);
+  --chart-1: oklch(0.7 0.14 185);
+  --chart-2: oklch(0.72 0.11 225);
+  --chart-3: oklch(0.65 0.11 255);
+  --chart-4: oklch(0.78 0.1 150);
+  --chart-5: oklch(0.75 0.13 75);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -120,6 +120,14 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 8% -8%, oklch(0.86 0.075 184 / 38%), transparent 30rem),
+      radial-gradient(circle at 100% 10%, oklch(0.9 0.06 225 / 34%), transparent 26rem);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: oklch(0.78 0.11 185 / 45%);
+    color: var(--foreground);
   }
 }
 

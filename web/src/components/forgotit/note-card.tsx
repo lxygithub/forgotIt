@@ -57,7 +57,7 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
       transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.2), ease: 'easeOut' }}
       whileHover={{ y: -3 }}
       onClick={() => onOpen(note)}
-      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-ring"
+      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/90 shadow-[0_10px_28px_-22px_color-mix(in_oklab,var(--foreground)_45%,transparent)] backdrop-blur-sm transition-[transform,box-shadow,border-color] hover:border-primary/25 hover:shadow-[0_18px_38px_-24px_color-mix(in_oklab,var(--primary)_70%,transparent)] focus-visible:outline-2 focus-visible:outline-ring"
       role="button"
       tabIndex={0}
       aria-label={title ? `打开笔记：${title}` : '打开无标题笔记'}
@@ -77,7 +77,7 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
           size="icon"
           aria-label={note.pinned ? '取消置顶' : '置顶笔记'}
           title={note.pinned ? '取消置顶' : '置顶'}
-          className="size-8 rounded-full border bg-background/80 backdrop-blur hover:bg-background"
+          className="size-8 rounded-full border border-border/70 bg-background/75 backdrop-blur hover:bg-background"
           onClick={(e) => {
             e.stopPropagation();
             onTogglePin(note);
@@ -90,7 +90,7 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
           size="icon"
           aria-label="编辑笔记"
           title="编辑"
-          className="size-8 rounded-full border bg-background/80 backdrop-blur hover:bg-background"
+          className="size-8 rounded-full border border-border/70 bg-background/75 backdrop-blur hover:bg-background"
           onClick={(e) => {
             e.stopPropagation();
             onOpen(note);
@@ -103,7 +103,7 @@ export function NoteCard({ note, onOpen, onTogglePin, onDelete, index = 0, pendi
           size="icon"
           aria-label="移入回收站"
           title="删除"
-          className="size-8 rounded-full border bg-background/80 text-destructive backdrop-blur hover:bg-background hover:text-destructive"
+          className="size-8 rounded-full border border-border/70 bg-background/75 text-destructive backdrop-blur hover:bg-background hover:text-destructive"
           onClick={(e) => {
             e.stopPropagation();
             onDelete(note);
