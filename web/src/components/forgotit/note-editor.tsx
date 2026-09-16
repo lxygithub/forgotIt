@@ -27,6 +27,7 @@ import {
   type NoteType,
 } from '@/lib/api';
 import { organizeWithInputBestEffort } from '@/lib/organize-orchestrator';
+import { ocrImageText } from '@/lib/ondevice/ocr';
 import { createNoteLocalFirst, deleteNoteLocalFirst, updateNoteLocalFirst } from '@/lib/local-first';
 import { useSyncStore } from '@/lib/sync-store';
 
@@ -55,13 +56,36 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-/** 不调用 AI：取正文第一句作为标题，图片笔记则使用固定标题。 */
-function makeAutomaticTitle(content: string, hasAttachments: boolean): string {
+function cleanTitleCandidate(value: string): string {
+  return value
+    .replace(/^【图片识别文字】\s*/, '')
+    .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/, '')
+    .replace(/[`*_]/g, '')
+    .trim()
+    .slice(0, 80);
+}
+
+/** OCR 正文会成为优先标题；无文字的图片则使用上传时 AI 生成的图片描述。 */
+function makeAutomaticTitle(content: string, attachments: AttachmentDto[]): string {
   const firstLine = content
     .split(/\r?\n/)
-    .map((line) => line.replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/, '').replace(/[`*_]/g, '').trim())
+    .map(cleanTitleCandidate)
+    .filter((line) => line && line !== '【图片识别文字】')
     .find(Boolean);
-  return (firstLine || (hasAttachments ? '图片笔记' : '随手记')).slice(0, 80);
+  const imageDescription = attachments
+    .map((attachment) => cleanTitleCandidate(attachment.description ?? ''))
+    .find(Boolean);
+  return firstLine || imageDescription || (attachments.length > 0 ? '图片笔记' : '随手记');
+}
+
+function appendOcrText(content: string, ocrText: string | null | undefined): string {
+  const text = ocrText?.trim();
+  if (!text || content.includes(text)) return content;
+  return [content.trimEnd(), `【图片识别文字】\n${text}`].filter(Boolean).join('\n\n');
+}
+
+function appendAttachmentOcr(content: string, attachments: AttachmentDto[]): string {
+  return attachments.reduce((next, attachment) => appendOcrText(next, attachment.ocrText), content);
 }
 
 function newBackgroundTaskId(): string {
@@ -133,7 +157,19 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
           dataUrl,
           mimeType: file.type,
         });
-        setPendingAttachments((prev) => [...prev, res.attachment]);
+        let attachment = res.attachment;
+        // 服务端 VLM 未返回 OCR 时，尝试设备内 OCR；识别结果仍会写入正文，
+        // 因此即使附件元数据暂时没更新，笔记本身也不会丢失图片中的文字。
+        if (!attachment.ocrText?.trim()) {
+          try {
+            const localOcr = await ocrImageText(file);
+            if (localOcr) attachment = { ...attachment, ocrText: localOcr };
+          } catch {
+            // 端侧 OCR 初次下载语言包或设备能力不足时静默降级到服务端结果。
+          }
+        }
+        setPendingAttachments((prev) => [...prev, attachment]);
+        setContent((prev) => appendOcrText(prev, attachment.ocrText));
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '图片识别失败');
@@ -160,8 +196,10 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
 
   const handleSave = (organize: boolean) => {
     if (saving || uploading) return;
-    const resolvedTitle = title.trim() || makeAutomaticTitle(content, attachmentIds.length > 0);
-    const draft: NoteDraft = { title: resolvedTitle, content, localOnly, attachmentIds };
+    const allAttachments = [...existingAttachments, ...pendingAttachments];
+    const contentWithOcr = appendAttachmentOcr(content, allAttachments);
+    const resolvedTitle = title.trim() || makeAutomaticTitle(contentWithOcr, allAttachments);
+    const draft: NoteDraft = { title: resolvedTitle, content: contentWithOcr, localOnly, attachmentIds };
     const taskId = newBackgroundTaskId();
     setSaving(true);
     const offline = useSyncStore.getState().offlineMode;
