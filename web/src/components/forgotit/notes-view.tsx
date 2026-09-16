@@ -23,6 +23,7 @@ import {
   type TagDto,
 } from '@/lib/api';
 import { mergeOverlay } from '@/lib/local-first';
+import { readHomeSnapshot, writeHomeSnapshot } from '@/lib/home-cache';
 import { useSyncStore } from '@/lib/sync-store';
 import { cn } from '@/lib/utils';
 
@@ -68,8 +69,12 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
   const searchInputRef = useRef<HTMLInputElement>(null);
   const overlay = useSyncStore((s) => s.overlay);
 
-  const filterKey = `${filter.q}|${filter.type}|${filter.pinned}|${filter.tag?.id ?? ''}|${filter.mode}|${refreshKey}|${reloadNonce}`;
-  const loading = notes === null || loadedKey !== filterKey;
+  const queryKey = `${filter.q}|${filter.type}|${filter.pinned}|${filter.tag?.id ?? ''}|${filter.mode}`;
+  const filterKey = `${queryKey}|${refreshKey}|${reloadNonce}`;
+  // 同一筛选条件的后台刷新保留当前列表，避免保存笔记时整页又回到骨架屏。
+  const loading = notes === null || loadedKey !== queryKey;
+  // 仅缓存无筛选的首页；搜索结果和标签筛选随输入变化快，不适合复用旧结果。
+  const isHomeList = !filter.q && filter.type === 'all' && !filter.pinned && !filter.tag;
 
   // 外部清空/改变搜索时同步输入框（官方推荐的 render 阶段状态调整模式）
   const [prevQ, setPrevQ] = useState(filter.q);
@@ -80,6 +85,17 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
 
   useEffect(() => {
     const ac = new AbortController();
+    // 缓存先行：不等远端 PostgreSQL/隧道响应，先显示上次成功加载的首页快照。
+    // 请求仍会继续执行，确保其他设备的变更能很快反映出来。
+    if (isHomeList) {
+      const cached = readHomeSnapshot();
+      if (cached) {
+        setNotes(mergeOverlay(cached.notes, overlay));
+        setStats(cached.stats);
+        setExpansions([]);
+        setLoadedKey(queryKey);
+      }
+    }
     const query: NotesQuery = {
       q: filter.q || undefined,
       type: filter.type,
@@ -119,7 +135,10 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
           ]);
           if (ac.signal.aborted) return;
           merged = mergeOverlay(notesRes.notes, overlay, filter.q);
-          if (statsRes) setStats(statsRes);
+          if (statsRes) {
+            setStats(statsRes);
+            if (isHomeList) writeHomeSnapshot(notesRes.notes, statsRes);
+          }
         }
         // 置顶优先，其余按更新时间倒序
         const sorted = [...merged].sort(
@@ -134,11 +153,11 @@ export function NotesView({ filter, onFilterChange, refreshKey, onEditNote, onNe
         toast.error(err instanceof Error ? err.message : '加载笔记失败');
         setNotes([]);
       } finally {
-        if (!ac.signal.aborted) setLoadedKey(filterKey);
+        if (!ac.signal.aborted) setLoadedKey(queryKey);
       }
     })();
     return () => ac.abort();
-  }, [filter, filterKey, refreshKey, overlay]);
+  }, [filter, filterKey, refreshKey, overlay, isHomeList]);
 
   const hasFilter = Boolean(filter.q || filter.type !== 'all' || filter.pinned || filter.tag);
 

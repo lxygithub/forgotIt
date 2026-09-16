@@ -1,8 +1,18 @@
 'use client';
 
+import { useState } from 'react';
 import { Brain, CloudOff, Loader2, LogOut, RefreshCw, Settings2 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
-import { useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { AiSettingsDialog } from '@/components/forgotit/ai-settings-dialog';
 import { ThemeToggle } from '@/components/forgotit/theme-toggle';
@@ -22,9 +32,12 @@ const NAV_ITEMS: { key: AppView; label: string }[] = [
 interface AppHeaderProps {
   view: AppView;
   onViewChange: (view: AppView) => void;
+  /** 编辑器关闭后仍在后台执行的保存 / AI 整理任务。 */
+  backgroundTask?: string | null;
 }
 
-export function AppHeader({ view, onViewChange }: AppHeaderProps) {
+export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps) {
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const syncOpen = useSyncStore((s) => s.panelOpen);
   const setSyncOpen = useSyncStore((s) => s.setPanelOpen);
   const syncStatus = useSyncStore((s) => s.status);
@@ -131,7 +144,7 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
           <button
             type="button"
             aria-label={BRAND.logoutAria}
-            onClick={() => void signOut({ callbackUrl: '/login' })}
+            onClick={() => setLogoutConfirmOpen(true)}
             className="inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9"
           >
             <LogOut className="size-[18px]" aria-hidden="true" />
@@ -139,8 +152,38 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
           <ThemeToggle />
         </div>
       </div>
-
       <AiSettingsDialog open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
+      {backgroundTask && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border-t border-primary/15 bg-primary/10 text-primary"
+        >
+          <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-1.5 text-xs font-medium">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            {backgroundTask}
+          </div>
+        </div>
+      )}
+      <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <AlertDialogContent className="max-w-sm p-5 sm:p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认退出登录？</AlertDialogTitle>
+            <AlertDialogDescription>
+              退出后需要重新输入密码才能访问你的笔记。本机缓存不会因此删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-11 sm:h-9">取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-11 bg-destructive text-white hover:bg-destructive/90 sm:h-9"
+              onClick={() => void signOut({ callbackUrl: '/login' })}
+            >
+              退出登录
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   );
 }

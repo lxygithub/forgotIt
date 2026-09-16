@@ -26,6 +26,12 @@ export default function Home() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorNote, setEditorNote] = useState<NoteDto | null>(null);
+  const [backgroundTasks, setBackgroundTasks] = useState<Record<string, string>>({});
+  const backgroundMessages = Object.values(backgroundTasks);
+  const backgroundTask =
+    backgroundMessages.length > 0
+      ? `${backgroundMessages[0]}${backgroundMessages.length > 1 ? `（另有 ${backgroundMessages.length - 1} 项任务）` : ''}`
+      : null;
 
   // 同步引擎：初始化 + 服务端变更驱动列表刷新
   const initSync = useSyncStore((s) => s.init);
@@ -152,7 +158,7 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <AppHeader view={view} onViewChange={setView} />
+      <AppHeader view={view} onViewChange={setView} backgroundTask={view === 'notes' ? backgroundTask : null} />
 
       <h1 className="sr-only">{`${BRAND.appName} — ${BRAND.slogan}，${BRAND.tagline}`}</h1>
 
@@ -237,6 +243,15 @@ export default function Home() {
         note={editorNote}
         onOpenChange={setEditorOpen}
         onSaved={bumpRefresh}
+        onBackgroundWorkChange={(taskId, message) => {
+          setBackgroundTasks((current) => {
+            if (message) return { ...current, [taskId]: message };
+            const next = { ...current };
+            delete next[taskId];
+            return next;
+          });
+          if (message) setView('notes');
+        }}
       />
     </div>
   );
