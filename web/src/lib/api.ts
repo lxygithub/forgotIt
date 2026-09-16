@@ -193,6 +193,50 @@ export function uploadAttachment(body: UploadAttachmentBody, signal?: AbortSigna
   return request('/api/ai/attachments', { method: 'POST', body: JSON.stringify(body), signal });
 }
 
+// ---------- AI 模型设置（v1.4 设置入口，对应 /api/settings/ai） ----------
+
+export type AiConfigSourceDto = 'db' | 'env' | 'file' | 'none';
+
+export interface AiConfigInfoDto {
+  configured: boolean;
+  source: AiConfigSourceDto;
+  baseUrl: string;
+  model: string;
+  apiKeyMasked: string;
+  hasToken: boolean;
+}
+
+export interface AiConfigInput {
+  baseUrl: string;
+  /** 留空 = 服务端沿用已保存的 Key（首次配置必填） */
+  apiKey?: string;
+  token?: string;
+  model?: string;
+}
+
+export interface AiTestResultDto {
+  ok: boolean;
+  latencyMs: number;
+  error?: string;
+  reply?: string;
+}
+
+export function getAiConfig(signal?: AbortSignal): Promise<AiConfigInfoDto> {
+  return request('/api/settings/ai', { signal });
+}
+
+export function saveAiConfig(body: AiConfigInput, signal?: AbortSignal): Promise<AiConfigInfoDto> {
+  return request('/api/settings/ai', { method: 'PUT', body: JSON.stringify(body), signal });
+}
+
+export function clearAiConfig(signal?: AbortSignal): Promise<AiConfigInfoDto> {
+  return request('/api/settings/ai', { method: 'DELETE', signal });
+}
+
+export function testAiConfig(body: AiConfigInput, signal?: AbortSignal): Promise<AiTestResultDto> {
+  return request('/api/settings/ai/test', { method: 'POST', body: JSON.stringify(body), signal });
+}
+
 // ---------- 标签 / 统计 / 种子 ----------
 
 export function getTags(signal?: AbortSignal): Promise<{ categories: TagWithCount[]; free: TagWithCount[] }> {

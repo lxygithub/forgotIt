@@ -6,10 +6,13 @@
 //   - 请求形态与 z-ai-web-dev-sdk 0.0.18 完全一致（/chat/completions 与
 //     /chat/completions/vision 两个 OpenAI 兼容端点，Bearer 认证 + thinking 默认
 //     disabled），仅改为内置 fetch 实现，Node 与 Cloudflare Workers 通跑。
-//   - 凭证解析：环境变量 ZAI_BASE_URL / ZAI_API_KEY 优先（Workers 部署必用），
-//     缺省回落 .z-ai-config 文件（cwd → ~ → /etc，查找顺序与 SDK 一致）。
+//   - 凭证解析（v1.4 起）：① 界面配置（Setting 表，前端「设置」入口写入）
+//     → ② 环境变量 ZAI_BASE_URL / ZAI_API_KEY（Workers 部署必用）
+//     → ③ 缺省回落 .z-ai-config 文件（cwd → ~ → /etc，查找顺序与 SDK 一致）。
+//   - 配置结果带 30s 内存缓存；界面改配置由写路径立即失效（多实例最多 30s 收敛）。
 
 import { DEFAULT_CATEGORIES } from '@/lib/note-repo';
+import { getAiProviderConfig, maskApiKey } from '@/lib/settings';
 
 interface ZaiConfig {
   baseUrl: string;
@@ -33,21 +36,52 @@ interface ChatCompletionResponse {
 }
 
 let cachedConfig: ZaiConfig | null | undefined;
+let cachedSource: AiConfigSource = 'none';
+let cachedAt = 0;
+const CONFIG_CACHE_TTL_MS = 30_000;
 
-/** 解析 Z.ai 凭证：环境变量优先，回落 .z-ai-config 文件（Node 侧） */
+export type AiConfigSource = 'db' | 'env' | 'file' | 'none';
+
+function remember(cfg: ZaiConfig | null, source: AiConfigSource): ZaiConfig | null {
+  cachedConfig = cfg;
+  cachedSource = source;
+  cachedAt = Date.now();
+  return cfg;
+}
+
+/** 解析 AI 凭证：界面配置 → 环境变量 → .z-ai-config 文件（Node 侧），带 30s 缓存 */
 async function resolveZaiConfig(): Promise<ZaiConfig | null> {
-  if (cachedConfig !== undefined) return cachedConfig;
+  if (cachedConfig !== undefined && Date.now() - cachedAt < CONFIG_CACHE_TTL_MS) {
+    return cachedConfig;
+  }
 
+  // 1) 界面配置（Setting 表；表不存在/连不上时静默降级，绝不能弄崩业务）
+  const dbCfg = await getAiProviderConfig();
+  if (dbCfg?.baseUrl && dbCfg?.apiKey) {
+    return remember(
+      {
+        baseUrl: dbCfg.baseUrl.replace(/\/+$/, ''),
+        apiKey: dbCfg.apiKey,
+        token: dbCfg.token || undefined,
+        model: dbCfg.model || undefined,
+      },
+      'db'
+    );
+  }
+
+  // 2) 环境变量（Workers 部署的经典方式）
   const envBase = process.env.ZAI_BASE_URL?.trim();
   const envKey = process.env.ZAI_API_KEY?.trim();
   if (envBase && envKey) {
-    cachedConfig = {
-      baseUrl: envBase.replace(/\/+$/, ''),
-      apiKey: envKey,
-      token: process.env.ZAI_TOKEN?.trim() || undefined,
-      model: process.env.ZAI_MODEL?.trim() || undefined,
-    };
-    return cachedConfig;
+    return remember(
+      {
+        baseUrl: envBase.replace(/\/+$/, ''),
+        apiKey: envKey,
+        token: process.env.ZAI_TOKEN?.trim() || undefined,
+        model: process.env.ZAI_MODEL?.trim() || undefined,
+      },
+      'env'
+    );
   }
 
   // 文件兜底：仅在 Node 侧生效（Workers 无文件系统，import 失败会被捕获）
@@ -66,14 +100,16 @@ async function resolveZaiConfig(): Promise<ZaiConfig | null> {
       try {
         const parsed = JSON.parse(await readFile(configPath, 'utf-8')) as Partial<ZaiConfig>;
         if (parsed.baseUrl && parsed.apiKey) {
-          cachedConfig = {
-            baseUrl: parsed.baseUrl.replace(/\/+$/, ''),
-            apiKey: parsed.apiKey,
-            token: typeof parsed.token === 'string' ? parsed.token : undefined,
-            chatId: typeof parsed.chatId === 'string' ? parsed.chatId : undefined,
-            userId: typeof parsed.userId === 'string' ? parsed.userId : undefined,
-          };
-          return cachedConfig;
+          return remember(
+            {
+              baseUrl: parsed.baseUrl.replace(/\/+$/, ''),
+              apiKey: parsed.apiKey,
+              token: typeof parsed.token === 'string' ? parsed.token : undefined,
+              chatId: typeof parsed.chatId === 'string' ? parsed.chatId : undefined,
+              userId: typeof parsed.userId === 'string' ? parsed.userId : undefined,
+            },
+            'file'
+          );
         }
       } catch {
         // 尝试下一个位置
@@ -83,8 +119,89 @@ async function resolveZaiConfig(): Promise<ZaiConfig | null> {
     // Workers：无 fs，忽略
   }
 
-  cachedConfig = null;
-  return cachedConfig;
+  return remember(null, 'none');
+}
+
+/** 供设置路由展示的当前生效配置概览（apiKey 只回掩码，完整 key 不出服务端） */
+export interface AiConfigInfo {
+  configured: boolean;
+  source: AiConfigSource;
+  baseUrl: string;
+  model: string;
+  apiKeyMasked: string;
+  hasToken: boolean;
+}
+
+export async function getAiConfigInfo(): Promise<AiConfigInfo> {
+  const config = await resolveZaiConfig();
+  return {
+    configured: !!config,
+    source: cachedSource,
+    baseUrl: config?.baseUrl ?? '',
+    model: config?.model ?? '',
+    apiKeyMasked: config ? maskApiKey(config.apiKey) : '',
+    hasToken: !!config?.token,
+  };
+}
+
+/** 界面保存/清除配置后调用：让下一次 AI 调用重新解析（本实例立即生效） */
+export function invalidateAiConfigCache(): void {
+  cachedConfig = undefined;
+  cachedSource = 'none';
+  cachedAt = 0;
+}
+
+/** 按配置组装请求头（zaiChat 与连通性测试共用） */
+function buildHeaders(config: ZaiConfig): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${config.apiKey}`,
+    'X-Z-AI-From': 'Z',
+  };
+  if (config.chatId) headers['X-Chat-Id'] = config.chatId;
+  if (config.userId) headers['X-User-Id'] = config.userId;
+  if (config.token) headers['X-Token'] = config.token;
+  return headers;
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  latencyMs: number;
+  error?: string;
+  reply?: string;
+}
+
+/** 连通性测试：用给定配置发一次最小 chat 请求（保存前先验证，15s 超时） */
+export async function testAiConnection(cfg: ZaiConfig): Promise<AiTestResult> {
+  const started = Date.now();
+  try {
+    const response = await fetch(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: buildHeaders(cfg),
+      body: JSON.stringify({
+        ...(cfg.model ? { model: cfg.model } : {}),
+        messages: [
+          { role: 'assistant', content: '你是连通性测试助手，只回复两个字母：OK' },
+          { role: 'user', content: 'ping' },
+        ] satisfies ChatMessage[],
+        thinking: { type: 'disabled' },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      const text = await response.text();
+      return { ok: false, latencyMs, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    const data = (await response.json()) as ChatCompletionResponse;
+    return { ok: true, latencyMs, reply: data.choices?.[0]?.message?.content?.trim() || '' };
+  } catch (err) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 /** 与 SDK 同形态的 OpenAI 兼容调用（thinking 默认 disabled，与 0.0.18 行为一致） */
@@ -103,17 +220,9 @@ async function zaiChat(
   // 需要时可设 ZAI_VISION_PATH 覆盖。
   const visionPath = process.env.ZAI_VISION_PATH?.trim() || '/chat/completions';
   const url = `${config.baseUrl}${vision ? visionPath : '/chat/completions'}`;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${config.apiKey}`,
-    'X-Z-AI-From': 'Z',
-  };
-  if (config.chatId) headers['X-Chat-Id'] = config.chatId;
-  if (config.userId) headers['X-User-Id'] = config.userId;
-  if (config.token) headers['X-Token'] = config.token;
   const response = await fetch(url, {
     method: 'POST',
-    headers,
+    headers: buildHeaders(config),
     body: JSON.stringify({
       // 仅当配置了模型名时才带上：原 Z.ai 端点不需要（服务端决定），
       // DeepSeek 等端点则必传，缺失会报 "missing field `model`"。

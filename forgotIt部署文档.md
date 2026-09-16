@@ -318,8 +318,40 @@ Web 端采用 NextAuth **方案 A**：单用户 Credentials 登录 + JWT 会话�
 
 ## 5. AI 能力配置
 
-Web 原型的 AI 能力（自动打标签 / 摘要 / RAG 问答 / 图片理解 / 语义查询扩展与索引）
-由服务端 `z-ai-web-dev-sdk` 提供，需要一份 Z.ai 凭证文件 **`.z-ai-config`**（JSON）：
+AI 能力（自动打标签 / 摘要 / RAG 问答 / 图片理解 / 语义查询扩展与索引）需要一个
+**OpenAI 兼容端点 + API Key**。v1.4 起共三种配置方式，**优先级从高到低**：
+
+### 5.1 方式 A：网页界面配置（v1.4 起，推荐）
+
+登录后点右上角齿轮图标（「AI 模型配置」）→ 填写 → 保存，即时生效，**无需重新构建部署**。
+
+- **API 端点**：任意 OpenAI 兼容地址（智谱 `https://open.bigmodel.cn/api/paas/v4`、
+  DeepSeek `https://api.deepseek.com`、自建 OneAPI 等）；
+- **API Key**：对应平台的 Key。已保存过配置后，Key 输入框**留空 = 沿用已保存的 Key**（换端点/模型时不必重贴）；
+- **模型名（可选）**：DeepSeek 等「要求必传 model」的端点必须填（如 `deepseek-chat`）；
+  原生 Z.ai 端点留空即可（服务端决定模型）；
+- **X-Token（可选）**：仅 Z.ai 私有端点需要，一般端点留空；
+- **测试连接**：保存前可先发一次真实请求验证（15s 超时，显示延迟与模型回复）；
+- **清除配置**：删掉界面配置，AI 凭证回落到下面的环境变量 / 配置文件。
+
+安全性：配置存数据库 `Setting` 表（键 `ai`，JSON）；**完整 Key 永不出服务端**，
+对话框只显示掩码（`abcd••••wxyz`）；修改立即失效进程内 30s 配置缓存（多实例最多 30s 收敛）。
+
+> 线上 Workers 部署的界面配置写进的是**家里 PostgreSQL（Hyperdrive）**，首次保存会自动建 `Setting` 表（`CREATE TABLE IF NOT EXISTS`），无需手工迁移。
+
+### 5.2 方式 B：环境变量（部署期固定）
+
+```bash
+ZAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4   # OpenAI 兼容端点
+ZAI_API_KEY=sk-xxxx
+ZAI_MODEL=glm-4-flash        # 可选：显式模型名（DeepSeek 等必传 model 的端点需要）
+ZAI_TOKEN=xxxx               # 可选：仅 Z.ai 私有端点需要（随请求头 X-Token 透传）
+ZAI_VISION_PATH=/chat/completions  # 可选：图片理解路径（默认标准 OpenAI 兼容路径）
+```
+
+Workers 部署用 `bunx wrangler secret put ZAI_BASE_URL / ZAI_API_KEY` 设置（§11.3）。
+
+### 5.3 方式 C：`.z-ai-config` 文件（仅 Node 服务器 / Docker，SDK 传统方式）
 
 ```json
 {
@@ -328,7 +360,7 @@ Web 原型的 AI 能力（自动打标签 / 摘要 / RAG 问答 / 图片理解 /
 }
 ```
 
-**放置位置（按优先级，SDK 依次查找，取第一个命中的）**：
+**放置位置（按优先级，依次查找，取第一个命中的）**：
 
 | 优先级 | 路径 | 适用 |
 | --- | --- | --- |
@@ -341,6 +373,8 @@ Web 原型的 AI 能力（自动打标签 / 摘要 / RAG 问答 / 图片理解 /
 - `chmod 600 .z-ai-config`，属主设为运行服务的用户；
 - **不要提交进 git**（`web/.gitignore` 已包含 `.z-ai-config`）；
 - Docker 中通过卷只读挂载，不要 `COPY` 进镜像。
+
+> 三种方式同时存在时：**界面配置 > 环境变量 > 配置文件**。前两种对 Workers 部署都可用；文件方式在 Workers 上天然不可用（无文件系统）。
 
 **AI 不可用时的降级行为（实测）**：
 
@@ -540,7 +574,7 @@ bunx wrangler secret put NEXTAUTH_SECRET      # openssl rand -base64 32
 # 登录凭证二选一：生产推荐 scrypt 哈希（bun run hash-password <你的密码>），
 # 明文 AUTH_PASSWORD 也能工作（本次实战即用明文），两种都是 secret 不入库
 bunx wrangler secret put AUTH_PASSWORD_HASH
-bunx wrangler secret put ZAI_BASE_URL         # 可选：不配置则 AI 功能按 §5/§11.7 降级
+bunx wrangler secret put ZAI_BASE_URL         # 可选（v1.4 起也可在网页「AI 模型配置」里填，见 §5.1）
 bunx wrangler secret put ZAI_API_KEY
 # wrangler.jsonc vars 中改 NEXTAUTH_URL 为实际地址（如 https://forgotit.<account>.workers.dev）
 ```
@@ -647,7 +681,7 @@ wrangler.jsonc 显式设 `"preview_urls": false` 可消除部署警告。
 | --- | --- | --- |
 | 关键词搜索 / 本地向量语义搜索 / CRUD / 同步 / 图片上传预览 | ✅ 完全可用 | hash-ngram 嵌入是纯算法，不依赖 AI 端点 |
 | AI 查询扩展 / AI 整理 / RAG 问答 / 图片理解（VLM） | ⚠️ 优雅降级 | 请求 AI 时报错并回退（搜索回退原始词、整理提示失败），不影响其他功能 |
-| 恢复满血 AI | 更换公网可达的 AI 端点 | `bunx wrangler secret put ZAI_BASE_URL`（及 ZAI_API_KEY/ZAI_TOKEN）指向公网 API（如智谱开放平台 `https://open.bigmodel.cn/api/paas/v4` 或 `https://api.z.ai/api/paas/v4`，需相应平台的 API Key）后即时生效 |
+| 恢复满血 AI | 更换公网可达的 AI 端点 | 首选：登录后右上角齿轮「AI 模型配置」里直接填端点/Key/模型名（§5.1，无需重新部署）；或 `bunx wrangler secret put ZAI_BASE_URL`（及 ZAI_API_KEY/ZAI_TOKEN）指向公网 API（如智谱开放平台 `https://open.bigmodel.cn/api/paas/v4` 或 `https://api.z.ai/api/paas/v4`，需相应平台的 API Key）后即时生效 |
 
 设计依据：`reindexAllNotes` 对 AI 关键词逐条 try/catch（`keywordsFailed` 计数，不阻塞向量索引）；
 语义搜索的 AI 扩展失败自动回退原始查询词。行为在真实 Workers 上验证过（附录 #21）。

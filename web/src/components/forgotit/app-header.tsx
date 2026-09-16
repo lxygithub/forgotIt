@@ -1,8 +1,10 @@
 'use client';
 
-import { Brain, CloudOff, Loader2, LogOut, RefreshCw } from 'lucide-react';
+import { Brain, CloudOff, Loader2, LogOut, RefreshCw, Settings2 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { AiSettingsDialog } from '@/components/forgotit/ai-settings-dialog';
 import { ThemeToggle } from '@/components/forgotit/theme-toggle';
 import { BRAND } from '@/lib/brand';
 import { cn } from '@/lib/utils';
@@ -28,6 +30,7 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
   const syncStatus = useSyncStore((s) => s.status);
   const pendingCount = useSyncStore((s) => s.pendingCount);
   const offlineMode = useSyncStore((s) => s.offlineMode);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
@@ -114,6 +117,16 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
           >
             {BRAND.localModeBadgeShort}
           </Badge>
+          {/* AI 模型设置 */}
+          <button
+            type="button"
+            aria-label="AI 模型配置"
+            aria-haspopup="dialog"
+            onClick={() => setAiSettingsOpen(true)}
+            className="inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9"
+          >
+            <Settings2 className="size-[18px]" aria-hidden="true" />
+          </button>
           {/* 退出登录 */}
           <button
             type="button"
@@ -126,6 +139,8 @@ export function AppHeader({ view, onViewChange }: AppHeaderProps) {
           <ThemeToggle />
         </div>
       </div>
+
+      <AiSettingsDialog open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
     </header>
   );
 }

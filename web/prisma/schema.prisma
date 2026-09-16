@@ -135,3 +135,11 @@ model Tombstone {
   entityId   String
   deletedAt  DateTime @default(now())
 }
+
+// 运行时键值配置（v1.4：前端「AI 模型配置」入口；单用户应用键值各一行）
+// value 为 JSON 字符串，结构由调用方定义（ai 配置见 src/lib/settings.ts）
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt
+}
