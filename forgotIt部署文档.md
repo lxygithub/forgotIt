@@ -383,14 +383,14 @@ Workers 部署用 `bunx wrangler secret put ZAI_BASE_URL / ZAI_API_KEY` 设置�
 
 | 层级 | 推理位置 | 隐私 | 覆盖能力 |
 | --- | --- | --- | --- |
-| ① 端侧 | 用户设备浏览器内（Qwen2.5 0.5B/1.5B/3B 量化版） | ★ 笔记内容不出设备 | 自动标题、类目/标签/摘要、语义关键词；图片**印刷体文字**提取（Tesseract.js，chi_sim+eng） |
+| ① 端侧 | 用户设备浏览器内（Qwen2.5 0.5B/1.5B 量化版） | ★ 笔记内容不出设备 | 自动标题、类目/标签/摘要、语义关键词；图片**印刷体文字**提取（Tesseract.js，chi_sim+eng） |
 | ② 服务端 | 部署方配置的 OpenAI 兼容端点（含自建 Ollama） | 数据出户 | 全部 AI 能力（含 VLM 图片描述、RAG 问答、手写体识别） |
 | ③ 兜底 | — | — | 无标题笔记用正文首行截断；整理失败不影响笔记入库 |
 
 端侧能力入口：登录后「AI 模型配置」对话框底部的**「端侧 AI（在本设备上推理）」**区块：
 
 - 需要浏览器支持 **WebGPU**（2025-11 起 Chrome/Edge/Firefox/Safari 桌面版默认启用；Android Chrome 121+ 支持；iOS Safari 18+ 受限）。不支持时区块自动禁用并说明，三级链只剩服务端级；
-- 首次启用需下载模型权重（0.5B ≈ 500MB / 1.5B ≈ 1GB / 3B ≈ 2GB），存入浏览器 Cache API，**之后离线可用**；「清理模型缓存」可释放空间；
+- 首次启用需下载模型权重（0.5B ≈ 300MB / 1.5B ≈ 850MB），存入浏览器 Cache API，**之后离线可用**；「清理模型缓存」可释放空间；
 - 启用偏好与档位存 localStorage（**纯设备本地，不入库、不同步**）；
 - 端侧看不到 R2 里的历史图片，图片理解（描述）仍走服务端；粘贴图片的文字提取由端侧 OCR 并入正文后再整理；
 - 推理在 Web Worker 中执行，不阻塞界面；单次整理超时（2 分钟）自动放弃并降级服务端。
@@ -435,13 +435,13 @@ Next 的 SSR 构建图，OpenNext 一并塞进 Worker bundle，触发 **Cloudfla
 | `tessdata/{chi_sim,eng}.traineddata.gz` | OCR 语言包（4.0.0_best_int，与 oem=1 默认一致） | jsdelivr @tesseract.js-data |
 | `webllm/lib/index.js` | WebLLM ESM 入口 | node_modules/@mlc-ai/web-llm/lib |
 | `libs/web-llm-models/v0_2_84/base/*.wasm` | 三个 Qwen 档位的 model_lib | GitHub raw（binary-mlc-llm-libs） |
-| `hf/mlc-ai/Qwen2.5-{0.5B,1.5B,3B}-Instruct-q4f16_1-MLC/*` | 权重 shard + config + tokenizer（≈3.5GB） | HuggingFace |
+| `hf/mlc-ai/Qwen2.5-{0.5B,1.5B}-Instruct-q4f16_1-MLC/*` | 权重 shard + config + tokenizer（≈1.2GB） | HuggingFace |
 
 **上传命令**（凭证二选一：`export CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=…` 或 `bunx wrangler login`）：
 
 ```bash
 cd web
-bun run upload:ai-assets              # 全量 ≈3.5GB（幂等，断点续传，清单 .ai-assets-cache/uploaded.json）
+bun run upload:ai-assets              # 全量 ≈1.2GB（幂等，断点续传，清单 .ai-assets-cache/uploaded.json）
 bun run upload:ai-assets --tesseract  # 只传 OCR 部分 ≈70MB（想先快速验收端侧 OCR 时用）
 bun run upload:ai-assets --models=0.5b,1.5b  # 只传部分模型权重
 ```

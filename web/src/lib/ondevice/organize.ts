@@ -42,7 +42,7 @@ export async function organizeOnDevice(input: {
     const raw = await generate(system, user + retryHint, {
       maxTokens: MAX_TOKENS,
       temperature: TEMPERATURE,
-      timeoutMs: 120_000, // 0.5B-3B 本地推理，给足时间（设备慢也常见）
+      timeoutMs: 120_000, // 0.5B-1.5B 本地推理，给足时间（设备慢也常见）
     });
     lastRaw = raw;
     const parsed = extractJsonFromText<Record<string, unknown>>(raw);

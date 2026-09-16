@@ -70,14 +70,13 @@ export async function loadWebllm(): Promise<typeof import('@mlc-ai/web-llm')> {
 const SELF_HOSTED_MODEL_IDS = new Set<string>([
   'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
   'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
-  'Qwen2.5-3B-Instruct-q4f16_1-MLC',
 ]);
 
 const HF_MODEL_PREFIX = 'https://huggingface.co/';
 const MLC_LIBS_PREFIX = 'https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/';
 
 /**
- * 构造指向自托管 R2 的 AppConfig：把预置 model_list 里三个 Qwen 档位的
+ * 构造指向自托管 R2 的 AppConfig：把预置 model_list 里两个 Qwen 档位的
  * 权重地址（HuggingFace）与 model_lib 地址（GitHub raw）重写到 /api/ai-assets/*。
  * cdn 模式返回 undefined → WebLLM 使用自己的预置配置（官方默认行为）。
  */

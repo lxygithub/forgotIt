@@ -17,7 +17,7 @@
 //   1) export CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=xxx   # 推荐（无人值守）
 //   2) bunx wrangler login                                         # OAuth 交互登录
 // 之后：
-//   bun run upload:ai-assets              # 全量（tesseract + webllm + 三个模型，约 3.5GB）
+//   bun run upload:ai-assets              # 全量（tesseract + webllm + 两个模型，约 1.2GB）
 //   bun run upload:ai-assets --tesseract  # 只传 OCR 部分（约 70MB）
 //   bun run upload:ai-assets --models=1.5b,0.5b   # 只传指定模型
 //   bun run upload:ai-assets --force      # 忽略已上传清单强制重传
@@ -45,7 +45,6 @@ const MLC_LIBS_VERSION_PATH = 'v0_2_84/base';
 const MODELS = {
   '0.5b': { repo: 'mlc-ai/Qwen2.5-0.5B-Instruct-q4f16_1-MLC', lib: 'Qwen2-0.5B-Instruct-q4f16_1_cs1k-webgpu.wasm' },
   '1.5b': { repo: 'mlc-ai/Qwen2.5-1.5B-Instruct-q4f16_1-MLC', lib: 'Qwen2-1.5B-Instruct-q4f16_1_cs1k-webgpu.wasm' },
-  '3b': { repo: 'mlc-ai/Qwen2.5-3B-Instruct-q4f16_1-MLC', lib: 'Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm' },
 };
 
 const MIME = {

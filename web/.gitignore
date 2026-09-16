@@ -38,3 +38,6 @@ src/generated/
 
 # Cloudflare 部署凭证（gitignored，勿入库）
 .cf-*
+.cf-credentials
+.ai-assets-cache/
+ai-assets/
