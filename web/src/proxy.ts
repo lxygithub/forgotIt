@@ -11,7 +11,7 @@ import { getToken } from 'next-auth/jwt';
 
 export const config = {
   matcher: [
-    '/((?!login|api/auth|api/ai-assets|_next/static|_next/image|images/|logo.svg|robots.txt|favicon.ico).*)',
+    '/((?!login|api/auth|api/ai-assets|_next/static|_next/image|images/|logo.svg|robots.txt|favicon.ico|icon-192.png|icon-512.png|apple-touch-icon.png).*)',
   ],
 };
 
