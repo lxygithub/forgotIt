@@ -1,6 +1,6 @@
 'use client';
 
-// 设置页中的同步区：设备信息 / 离线模式 / 手动同步 / 重建语义索引 / 冲突记录处置
+// 设置页中的同步区：设备信息 / 自动离线状态 / 手动同步 / 重建语义索引 / 冲突记录处置
 // 对应文档 v2.0 第 6.5 节（冲突快照供用户查看）与第 8 节（换 embedding 模型后重索引）
 
 import { useEffect, useState } from 'react';
@@ -9,7 +9,6 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { BRAND } from '@/lib/brand';
 import { resolveConflict, reindexEmbeddings } from '@/lib/api';
 import { useSyncStore } from '@/lib/sync-store';
@@ -17,7 +16,6 @@ import { useSyncStore } from '@/lib/sync-store';
 export function SyncSettingsSection() {
   const deviceId = useSyncStore((s) => s.deviceId);
   const offlineMode = useSyncStore((s) => s.offlineMode);
-  const setOfflineMode = useSyncStore((s) => s.setOfflineMode);
   const syncIntervalMinutes = useSyncStore((s) => s.syncIntervalMinutes);
   const setSyncIntervalMinutes = useSyncStore((s) => s.setSyncIntervalMinutes);
   const pendingCount = useSyncStore((s) => s.pendingCount);
@@ -111,6 +109,17 @@ export function SyncSettingsSection() {
             <span className="text-muted-foreground">待同步变更</span>
             <Badge variant={pendingCount > 0 ? 'default' : 'outline'}>{pendingCount} 条</Badge>
           </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">网络状态</span>
+            {offlineMode ? (
+              <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
+                <CloudOff className="size-3.5" aria-hidden="true" />
+                本地保存中，恢复后自动同步
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">在线，自动同步中</span>
+            )}
+          </div>
           <Button onClick={handleSync} disabled={syncing || offlineMode} className="h-11 w-full sm:h-9">
             {syncing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
             {syncing ? BRAND.syncToast : BRAND.syncNowText}
@@ -144,23 +153,6 @@ export function SyncSettingsSection() {
           </Button>
         </div>
       </div>
-
-      {/* 离线模式 */}
-      <label className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border p-4">
-          <span className="space-y-1">
-            <span className="flex items-center gap-1.5 text-sm font-medium">
-              <CloudOff className="size-4" aria-hidden="true" />
-              {BRAND.syncOfflineLabel}
-            </span>
-            <span className="block text-xs text-muted-foreground">{BRAND.syncOfflineDesc}</span>
-          </span>
-          <Switch
-            checked={offlineMode}
-            onCheckedChange={setOfflineMode}
-            aria-label={BRAND.syncOfflineLabel}
-            className="mt-0.5"
-          />
-      </label>
 
       {/* 语义索引 */}
       <div className="flex items-center justify-between gap-3 rounded-lg border p-4">

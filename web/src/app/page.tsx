@@ -312,8 +312,7 @@ export default function Home() {
               disabled={capturing}
             >
               {capturing ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <ClipboardPaste className="size-5" aria-hidden="true" />}
-              {capturing ? '正在记下' : '粘贴记下'}
-              {!capturing && <span className="text-[10px] font-normal opacity-80">长按</span>}
+              {capturing ? '正在记下' : '记一笔'}
             </Button>
           </motion.div>
         )}

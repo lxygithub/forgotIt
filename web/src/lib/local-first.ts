@@ -20,6 +20,7 @@ export async function createNoteLocalFirst(body: CreateNoteBody): Promise<NoteDt
     } catch (err) {
       if (!isNetworkError(err)) throw err;
       // 网络失败 → 降级为离线写入
+      store.markOffline();
     }
   }
 
@@ -50,6 +51,7 @@ export async function updateNoteLocalFirst(
       return res.note;
     } catch (err) {
       if (!isNetworkError(err)) throw err;
+      store.markOffline();
     }
   }
 
@@ -83,6 +85,7 @@ export async function deleteNoteLocalFirst(id: string, base?: NoteDto | null): P
       return;
     } catch (err) {
       if (!isNetworkError(err)) throw err;
+      store.markOffline();
     }
   }
 
@@ -112,6 +115,7 @@ export async function restoreNoteLocalFirst(id: string, base?: NoteDto | null): 
       return res.note;
     } catch (err) {
       if (!isNetworkError(err)) throw err;
+      store.markOffline();
     }
   }
 

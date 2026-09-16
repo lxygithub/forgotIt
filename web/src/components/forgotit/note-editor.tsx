@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { ImagePlus, Loader2, Trash2, X } from 'lucide-react';
@@ -92,6 +92,130 @@ function newBackgroundTaskId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `save-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function pointerDistance(points: Map<number, { x: number; y: number }>): number | null {
+  const [first, second] = [...points.values()];
+  return first && second ? Math.hypot(first.x - second.x, first.y - second.y) : null;
+}
+
+function ImagePreviewDialog({ attachment, onClose }: { attachment: AttachmentDto | null; onClose: () => void }) {
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchStartRef = useRef<{ distance: number; scale: number } | null>(null);
+  const panStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+
+  const updatePointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updatePointer(event);
+    if (activePointersRef.current.size === 1 && scale > 1) {
+      panStartRef.current = { x: event.clientX, y: event.clientY, offsetX: offset.x, offsetY: offset.y };
+    } else {
+      const distance = pointerDistance(activePointersRef.current);
+      if (distance) {
+        pinchStartRef.current = { distance, scale };
+        panStartRef.current = null;
+      }
+    }
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!activePointersRef.current.has(event.pointerId)) return;
+    updatePointer(event);
+    const panStart = panStartRef.current;
+    if (activePointersRef.current.size === 1 && panStart) {
+      setOffset({ x: panStart.offsetX + event.clientX - panStart.x, y: panStart.offsetY + event.clientY - panStart.y });
+      return;
+    }
+    const distance = pointerDistance(activePointersRef.current);
+    const pinchStart = pinchStartRef.current;
+    if (!distance || !pinchStart) return;
+    setScale(Math.min(4, Math.max(1, pinchStart.scale * (distance / pinchStart.distance))));
+  };
+
+  const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.delete(event.pointerId);
+    if (activePointersRef.current.size < 2) pinchStartRef.current = null;
+    if (activePointersRef.current.size === 1 && scale > 1) {
+      const [remainingPointer] = activePointersRef.current.values();
+      panStartRef.current = {
+        x: remainingPointer.x,
+        y: remainingPointer.y,
+        offsetX: offset.x,
+        offsetY: offset.y,
+      };
+    } else if (activePointersRef.current.size === 0) {
+      panStartRef.current = null;
+    }
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setScale((current) => Math.min(4, Math.max(1, current * (event.deltaY < 0 ? 1.15 : 0.85))));
+  };
+
+  return (
+    <Dialog open={attachment !== null} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        className="fixed inset-0 z-[60] h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0 bg-black/95 p-0 shadow-none sm:max-w-none"
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>查看大图</DialogTitle>
+          <DialogDescription>{attachment?.description || '笔记附件图片'}</DialogDescription>
+        </DialogHeader>
+        <div
+          className="flex h-full w-full touch-none items-center justify-center overflow-hidden p-2 sm:p-6"
+          style={{ touchAction: 'none' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onWheel={handleWheel}
+        >
+          {attachment && (
+            <img
+              src={attachment.filePath}
+              alt={attachment.description || '笔记附件图片'}
+              draggable={false}
+              className="h-full w-full select-none object-contain"
+              style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+            />
+          )}
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3 text-xs text-white/75 sm:p-5">
+          <span>双指缩放</span>
+          <div className="pointer-events-auto flex items-center gap-2">
+            {scale > 1 && (
+              <button
+                type="button"
+                className="rounded-full bg-black/55 px-3 py-2 hover:bg-black/75"
+                onClick={() => {
+                  setScale(1);
+                  setOffset({ x: 0, y: 0 });
+                }}
+              >
+                恢复原大小
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label="关闭大图预览"
+              className="rounded-full bg-black/55 p-2 hover:bg-black/75"
+              onClick={onClose}
+            >
+              <X className="size-5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWorkChange }: NoteEditorProps) {
@@ -214,7 +338,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
         const saved = await saveNote(draft);
         // 持久化完成即刷新首页；AI 整理不必阻塞新笔记出现在列表中。
         onSaved();
-        if (organize && !offline) {
+        if (organize && !useSyncStore.getState().offlineMode) {
           onBackgroundWorkChange(taskId, BRAND.organizeLoadingToast);
           // 三级降级：端侧 WebLLM → 服务端 AI → 静默（标题已有则不受影响）。
           const attempt = await organizeWithInputBestEffort(saved.id, {
@@ -230,7 +354,7 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
           } else {
             toast.warning('笔记已保存，但 AI 整理没成功，稍后可重试。');
           }
-        } else if (organize && offline) {
+        } else if (organize && useSyncStore.getState().offlineMode) {
           toast.warning('离线状态下 AI 不可用。笔记已存好，联网后可再让 AI 整理。');
         } else {
           toast.success(offline ? '已存进脑子（本地）。' : '已保存。');
@@ -455,26 +579,11 @@ export function NoteEditor({ open, note, onOpenChange, onSaved, onBackgroundWork
         </div>
       </DialogContent>
 
-      <Dialog
-        open={previewAttachment !== null}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) setPreviewAttachment(null);
-        }}
-      >
-        <DialogContent className="z-[60] w-auto max-w-[calc(100%-1rem)] border-0 bg-black/90 p-2 shadow-2xl sm:max-w-4xl">
-          <DialogHeader className="sr-only">
-            <DialogTitle>查看大图</DialogTitle>
-            <DialogDescription>{previewAttachment?.description || '笔记附件图片'}</DialogDescription>
-          </DialogHeader>
-          {previewAttachment && (
-            <img
-              src={previewAttachment.filePath}
-              alt={previewAttachment.description || '笔记附件图片'}
-              className="max-h-[85dvh] max-w-full rounded object-contain"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <ImagePreviewDialog
+        key={previewAttachment?.id ?? 'no-preview'}
+        attachment={previewAttachment}
+        onClose={() => setPreviewAttachment(null)}
+      />
     </Dialog>
   );
 }

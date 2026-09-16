@@ -36,7 +36,7 @@ export function SettingsView() {
       <section className="space-y-4" aria-labelledby="sync-settings-title">
         <div>
           <h3 id="sync-settings-title" className="text-base font-semibold">同步与设备</h3>
-          <p className="mt-1 text-sm text-muted-foreground">管理自动同步、离线写入和设备上的待同步变更。</p>
+          <p className="mt-1 text-sm text-muted-foreground">网络不可用或较弱时会自动本地保存，恢复后自动同步待处理变更。</p>
         </div>
         <SyncSettingsSection />
       </section>

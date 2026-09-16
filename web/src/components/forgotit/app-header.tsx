@@ -76,7 +76,7 @@ export function AppHeader({ view, onViewChange, backgroundTask }: AppHeaderProps
         <div className="ml-auto flex items-center gap-2 sm:ml-3">
           <button
             type="button"
-            aria-label={offlineMode ? '同步：离线模式，点击打开设置' : '同步状态，点击打开设置'}
+            aria-label={offlineMode ? '同步：网络不可用或较弱，正在本地保存，点击打开设置' : '同步状态，点击打开设置'}
             onClick={() => onViewChange('settings')}
             className={cn(
               'relative inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:size-9',
