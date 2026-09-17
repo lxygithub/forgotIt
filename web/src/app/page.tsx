@@ -172,6 +172,22 @@ export default function Home() {
     setEditorOpen(true);
   }, []);
 
+  // 桌面图标长按菜单（manifest.shortcuts）的深链：
+  //   /?action=paste → 粘贴记（读剪贴板直接记一条）
+  //   /?action=new   → 记笔记（打开空白编辑器）
+  // 用 ref 保证只处理一次（handleMobilePaste 未 memo 化，放进依赖数组会重复触发），
+  // 处理完立刻清掉查询参数，刷新时不会重复弹出。
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current || typeof window === 'undefined') return;
+    const action = new URLSearchParams(window.location.search).get('action');
+    if (action !== 'paste' && action !== 'new') return;
+    deepLinkHandledRef.current = true;
+    window.history.replaceState(null, '', window.location.pathname);
+    if (action === 'paste') void handleMobilePaste();
+    else openNewNote();
+  });
+
   const cancelFabLongPress = () => {
     if (longPressTimerRef.current !== null) {
       clearTimeout(longPressTimerRef.current);
