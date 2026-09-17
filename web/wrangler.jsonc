@@ -9,10 +9,18 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  // 把 bundle 目录内全部文件（含 Prisma wasm）上传为可通过 node:fs 读取的模块
-  // find_additional_modules 已关闭：新生成器的 prisma wasm 走 ?module 静态导入（已打进 bundle），
-  // 无需把整个 bundle 目录（含被 trace 误收的 1.3GB node_modules）上传为 fs 模块，且可避开 64MiB 限制
-  // "find_additional_modules": true,
+  // Prisma 的 Query Compiler 在运行时通过 node:fs 读取 wasm；把这一份文件以原路径
+  // 作为 Worker 模块上传。不能让 Wrangler 改名，否则会出现
+  // "readAll '/bundle/static/wasm/*.wasm'" 找不到文件，所有数据库查询都会失败。
+  "find_additional_modules": true,
+  "base_dir": ".open-next",
+  "preserve_file_names": true,
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["static/wasm/**/*.wasm"]
+    }
+  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
