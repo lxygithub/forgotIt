@@ -13,16 +13,10 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  // 2026-09 迁移后 D1 已不再是主存储。此绑定暂时保留，作为回滚路径
-  // （把 vars.DB_DRIVER 改回 "d1" 并还原 src/lib/db.ts 的 D1 分支即可切回）。
-  // 线上稳定后，可连同 @prisma/adapter-d1 依赖一并移除。
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "forgotit",
-      "database_id": "a34b542f-dbbb-4111-b5e9-38a26890660d"
-    }
-  ],
+  // 2026-09-17：D1 库已删除（绑定留着会让 `wrangler deploy` 报 code 10181
+  // 「references database ... which was not found」）。运行时数据一直在内网
+  // PostgreSQL，经 SQL Gateway 访问；回退通道是下面的 Hyperdrive 绑定。
+  // 顺带：vars 里的 DB_DRIVER 已无代码读取，@prisma/adapter-d1 依赖也已无引用。
   "r2_buckets": [
     {
       "binding": "BUCKET",
