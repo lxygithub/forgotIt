@@ -52,8 +52,8 @@
     "DB_DRIVER": "gateway",
     "SQL_GATEWAY_URL": "https://db-gateway.ieop.top/v1/query",
     "STORAGE_DRIVER": "r2",
-    // ⚠️ 替换为你的实际访问地址（如 https://forgotit.<account>.workers.dev 或自定义域）
-    "NEXTAUTH_URL": "https://forgotit.mewlxyy666.workers.dev",
+    // NextAuth 回调必须使用当前公开访问的自定义域。
+    "NEXTAUTH_URL": "https://forgotit.ieop.top",
     "AUTH_USERNAME": "owner"
   },
   "observability": {
