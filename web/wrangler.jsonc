@@ -13,6 +13,13 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Smart Placement：数据源是家用的内网 PostgreSQL（经 SQL Gateway），
+  // 让 Worker 尽量靠近数据源执行，减少「边缘 → 隧道 → 家机」往返（单程约 2.5s）
+  // 对每次请求的影响。静态资源不受影响：本配置没有 run_worker_first，
+  // 资源仍由边缘直接返回，只有未命中资源的请求才进 Worker。
+  "placement": {
+    "mode": "smart"
+  },
   // 2026-09-17：D1 库已删除（绑定留着会让 `wrangler deploy` 报 code 10181
   // 「references database ... which was not found」）。运行时数据一直在内网
   // PostgreSQL，经 SQL Gateway 访问；回退通道是下面的 Hyperdrive 绑定。
