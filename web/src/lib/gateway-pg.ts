@@ -88,8 +88,9 @@ class GatewayApi {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-    } catch {
-      throw new GatewayDatabaseError('无法连接 SQL Gateway');
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? `：${error.message}` : '';
+      throw new GatewayDatabaseError(`无法连接 SQL Gateway${detail}`);
     }
     const payload = await response.json().catch(() => undefined) as T | GatewayFailure | undefined;
     if (!response.ok) {
