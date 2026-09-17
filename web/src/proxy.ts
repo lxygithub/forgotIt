@@ -11,7 +11,9 @@ import { getToken } from 'next-auth/jwt';
 
 export const config = {
   matcher: [
-    '/((?!login|api/auth|api/ai-assets|_next/static|_next/image|images/|logo.svg|robots.txt|favicon.ico|icon-192.png|icon-512.png|apple-touch-icon.png).*)',
+    // 放行的静态资源里必须包含 PWA 的两个文件：manifest 与 Service Worker 都要能在
+    // 未登录时抓取，否则浏览器判定「不可安装」（manifest 被重定向到 /login 就是这种情况）
+    '/((?!login|api/auth|api/ai-assets|_next/static|_next/image|images/|logo.svg|robots.txt|favicon.ico|icon-192.png|icon-512.png|apple-touch-icon.png|manifest.webmanifest|sw.js).*)',
   ],
 };
 

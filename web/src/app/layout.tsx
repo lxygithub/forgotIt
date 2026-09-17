@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/forgotit/theme-provider";
+import { PwaRegister } from "@/components/pwa-register";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,6 +32,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7fbfc" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b1418" },
+  ],
 };
 
 export default function RootLayout({
@@ -51,6 +56,8 @@ export default function RootLayout({
         >
           {children}
           <Toaster position="top-center" />
+          {/* 注册 Service Worker：手机「添加到主屏幕」后缓存 App 壳 */}
+          <PwaRegister />
         </ThemeProvider>
       </body>
     </html>
