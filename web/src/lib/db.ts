@@ -13,7 +13,6 @@ import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
 import { getCloudflareContext } from '@opennextjs/cloudflare/cloudflare-context'
-import { PrismaClient as PrismaClientWorker } from '@/generated/prisma-worker/client'
 import { createGatewayPrismaAdapter } from '@/lib/gateway-pg'
 
 interface HyperdriveEnv {
@@ -37,9 +36,9 @@ function createHyperdriveWorkerClient(connectionString: string): PrismaClient {
 }
 
 function createGatewayWorkerClient(gatewayUrl: string): PrismaClient {
-  return new PrismaClientWorker({
+  return new PrismaClient({
     adapter: createGatewayPrismaAdapter(gatewayUrl),
-  }) as unknown as PrismaClient
+  })
 }
 
 function resolveDb(): PrismaClient {

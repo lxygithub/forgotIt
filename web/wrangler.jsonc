@@ -6,21 +6,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "forgotit",
-  "main": ".open-next/worker.js",
+  "main": "worker-wrapper.mjs",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  // Prisma 的 Query Compiler 在运行时通过 node:fs 读取 wasm；把这一份文件以原路径
-  // 作为 Worker 模块上传。不能让 Wrangler 改名，否则会出现
-  // "readAll '/bundle/static/wasm/*.wasm'" 找不到文件，所有数据库查询都会失败。
-  "find_additional_modules": true,
-  "base_dir": ".open-next",
-  "preserve_file_names": true,
-  "rules": [
-    {
-      "type": "CompiledWasm",
-      "globs": ["static/wasm/**/*.wasm"]
-    }
-  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"

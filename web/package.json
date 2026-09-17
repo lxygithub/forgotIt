@@ -13,9 +13,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "build:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && bun scripts/stage-prisma-wasm.mjs",
-    "preview:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && bun scripts/stage-prisma-wasm.mjs && opennextjs-cloudflare preview",
-    "deploy:cf": "bun scripts/gen-workers-schema.mjs && bunx prisma generate --schema prisma/schema.workers.prisma && opennextjs-cloudflare build && bun scripts/stage-prisma-wasm.mjs && opennextjs-cloudflare deploy",
+    "build:cf": "bunx prisma generate && opennextjs-cloudflare build && bun scripts/prepare-prisma-wasm.mjs",
+    "preview:cf": "bunx prisma generate && opennextjs-cloudflare build && bun scripts/prepare-prisma-wasm.mjs && opennextjs-cloudflare preview",
+    "deploy:cf": "bunx prisma generate && opennextjs-cloudflare build && bun scripts/prepare-prisma-wasm.mjs && opennextjs-cloudflare deploy",
     "pg:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/pg/schema.sql",
     "migrate:d1-to-pg": "bun scripts/migrate-d1-to-pg.mjs",
     "upload:ai-assets": "bun scripts/upload-ai-assets.mjs"

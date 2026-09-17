@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // OpenNext 会为默认位置的 Prisma client 注入 workerd 专用入口，并保留其预编译
+  // WASM 模块。自定义生成目录会跳过这一补丁，最终在 Worker 内触发被禁止的动态编译。
+  serverExternalPackages: ["@prisma/client", ".prisma/client"],
   // 图片不优化：品牌图为静态资源，关闭后 /_next/image 与 sharp 原生依赖退出构建图，
   // Node 与 Cloudflare Workers 双端行为一致（双部署支持，见部署文档 §11）
   images: {
