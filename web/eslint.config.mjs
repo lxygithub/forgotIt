@@ -44,7 +44,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", ".open-next/**", ".ai-assets-cache/**", ".wrangler/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  ignores: ["node_modules/**", ".next/**", ".open-next/**", ".ai-assets-cache/**", ".wrangler/**", "out/**", "build/**", "src/generated/prisma-worker/**", "next-env.d.ts", "examples/**", "skills"]
 }];
 
 export default eslintConfig;

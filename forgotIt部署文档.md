@@ -337,7 +337,8 @@ AI 能力（自动打标签 / 摘要 / RAG 问答 / 图片理解 / 语义查询�
 安全性：配置存数据库 `Setting` 表（键 `ai`，JSON）；**完整 Key 永不出服务端**，
 对话框只显示掩码（`abcd••••wxyz`）；修改立即失效进程内 30s 配置缓存（多实例最多 30s 收敛）。
 
-> 线上 Workers 部署的界面配置写进的是**家里 PostgreSQL（Hyperdrive）**，首次保存会自动建 `Setting` 表（`CREATE TABLE IF NOT EXISTS`），无需手工迁移。
+> 线上 Workers 部署的界面配置写进家里 PostgreSQL（经 SQL Gateway）。应用账号不拥有 DDL
+> 权限，`Setting` 表必须随正常 Prisma schema 迁移创建；运行时只验证并读写既有表。
 
 ### 5.2 方式 B：环境变量（部署期固定）
 
@@ -605,20 +606,20 @@ curl -X POST http://127.0.0.1:3000/api/ai/reindex
 | | Node（§4） | Workers（本节） |
 | --- | --- | --- |
 | 构建产物 | `.next/standalone` | OpenNext Worker（`.open-next/`） |
-| 数据库 | SQLite 文件（`DATABASE_URL`） | **自建 PostgreSQL**（经 Hyperdrive + Workers VPC，见 §11.8）|
+| 数据库 | SQLite 文件（`DATABASE_URL`） | **自建 PostgreSQL**（经 Cloudflare WAF + Tunnel + SQL Gateway，见 §11.9）|
 | 图片存储 | 磁盘 `public/uploads` | R2（存储适配层，读写同路径 `/uploads/…`） |
 | AI 凭证 | `.z-ai-config` 文件（§5） | 环境变量 `ZAI_BASE_URL`/`ZAI_API_KEY`（可选 `ZAI_TOKEN`） |
-| 切换变量 | 无需设置（默认即 Node） | `DB_DRIVER=pg`、`STORAGE_DRIVER=r2`（wrangler vars） |
+| 切换变量 | 无需设置（默认即 Node） | `DB_DRIVER=gateway`、`SQL_GATEWAY_URL`、`STORAGE_DRIVER=r2`（wrangler vars） |
 | 接入层 | 可再加 CF 橙云 / Tunnel | 直连边缘 |
 
-> **数据库已于 2026-09-15 由 D1 迁往自建 PostgreSQL**，详见 **§11.8**（含架构图、
-> Hyperdrive/VPC/Tunnel 资源 ID、迁移脚本、回滚与排障）。`d1_databases` 绑定仍保留，
-> 作为随时可切回的回滚路径。
+> **数据库已于 2026-09-15 由 D1 迁往自建 PostgreSQL**。§11.8 保留首次迁移与
+> Hyperdrive 回退链路的历史记录；当前 Workers 运行路径是 §11.9 的 SQL Gateway。
+> `d1_databases` 绑定仍保留，作为随时可切回的回滚路径。
 
-关键实现（理解后再排障）：`src/lib/db.ts` 按 `DB_DRIVER` 选择驱动——Node 走默认 Prisma
-客户端（直连 `DATABASE_URL`），Workers 走新生成器产出的 workerd 客户端 + `@prisma/adapter-pg`，
-经 Hyperdrive 连接家里的 PostgreSQL；**每个请求新建一个客户端**（Workers 禁止跨请求复用
-I/O 对象），对外仍导出 `db`（Proxy 延迟解析），调用点无需感知。图片经 `src/lib/storage/`
+关键实现（理解后再排障）：`src/lib/db.ts` 中 Node 走默认 Prisma 客户端（直连 `DATABASE_URL`），
+Workers 走 workerd Prisma Client + `@prisma/adapter-pg`，底层由 `src/lib/gateway-pg.ts` 映射到
+HTTPS SQL Gateway；**每个请求新建一个客户端**（Workers 禁止跨请求复用 I/O 对象），对外仍导出
+`db`（Proxy 延迟解析），调用点无需感知。图片经 `src/lib/storage/`
 抽象（local / r2 两实现），Workers 上由 `/uploads/[...key]` 路由从 R2 流式读取，
 鉴权门禁（`/uploads/*`）两端一致。
 
@@ -762,7 +763,7 @@ wrangler.jsonc 显式设 `"preview_urls": false` 可消除部署警告。
 另注意：**语义索引与笔记写入是异步解耦的**——创建后立即搜索可能为空（见 §11.6 末行），
 与 AI 可用性无关，Node 部署同理。
 
-### 11.8 数据库迁移：D1 → 自建 PostgreSQL（2026-09-15）
+### 11.8 历史记录：数据库迁移 D1 → 自建 PostgreSQL（2026-09-15）
 
 > 把线上数据库从 Cloudflare D1 换成自建 PostgreSQL。应用仍部署在 Workers，
 > 但数据落回自有服务器。本节记录架构、改动、迁移步骤、回滚与排障。
@@ -882,6 +883,34 @@ PG_URL="postgres://forgotit:<密码>@127.0.0.1:5432/forgotit" \
 | Hyperdrive 创建时报连接失败 | 依次排查：PG 是否 `ssl=on`、隧道连接器是否在线、VPC Service 端口是否 5432、`pg_hba` 是否允许 |
 | 英文关键词搜不到 | `contains` 是否带 `mode: 'insensitive'` |
 | 同步丢失变更 | 看 `SyncLog.seq` 是否仍为数据库自增（应为应用分配），以及写入是否在同一事务内 |
+
+### 11.9 当前 Workers 数据库路径：SQL Gateway
+
+当前架构：
+
+```text
+ForgotIt Worker → Cloudflare WAF → db-gateway.ieop.top → Tunnel → Nginx → SQL Gateway → PostgreSQL
+```
+
+Worker 变量：
+
+```jsonc
+"DB_DRIVER": "gateway",
+"SQL_GATEWAY_URL": "https://db-gateway.ieop.top/v1/query"
+```
+
+`gateway-pg.ts` 保持 Prisma 调用接口不变：普通 `SELECT` 使用只读账号；其它普通 SQL 使用受限读写
+账号；Prisma 事务通过 Gateway 的短生命周期事务会话完成，最长 15 秒，超时自动回滚。应用账号仅拥有
+业务表的 DML 权限，**不得**拥有 `CREATE/ALTER/DROP`；schema 变更必须由 PostgreSQL owner 在服务器侧
+单独执行。
+
+上线前安全检查：
+
+1. Gateway 只监听 `127.0.0.1:8787`，Nginx 仅发布 `POST /v1/query`；
+2. `db-gateway.ieop.top` 的 WAF 规则必须仅放行 ForgotIt Worker 实际所属 Zone；
+3. 从浏览器或 curl 请求 Gateway 必须得到 Cloudflare `403`；
+4. 用 Worker 执行无副作用的 Prisma `note.count()`，确认网关审计日志出现对应 SQL 指纹；
+5. 调用 `/api/settings/ai`，确认既有 `Setting` 表可读写，但不会再由应用自动建表。
 
 ---
 

@@ -11,7 +11,7 @@
 | --- | --- |
 | 框架 | Next.js 16（App Router）+ React 19 + TypeScript |
 | UI | Tailwind CSS 4 + shadcn/ui + Lucide + framer-motion + sonner |
-| 数据 | Prisma ORM + SQLite（单文件） |
+| 数据 | Prisma ORM；本地 Node 使用 SQLite，Cloudflare Workers 经 HTTPS SQL Gateway 访问自建 PostgreSQL |
 | 鉴权 | NextAuth v4（Credentials 单用户 + JWT 会话 + proxy 全站门禁） |
 | 客户端状态 | Zustand（同步引擎）+ localStorage（outbox / 游标 / 设备 ID） |
 | AI | z-ai-web-dev-sdk（仅服务端），模拟文档规划的端侧推理 |
@@ -73,7 +73,8 @@ src/
 │   ├── sync-store.ts        客户端同步引擎：outbox、游标、30s 轮询、online 事件
 │   ├── local-first.ts       本地优先写入层（离线降级）
 │   ├── note-repo.ts         DTO 序列化 / 固定类目 / 类型推断
-│   └── db.ts                Prisma Client（Workers 下每请求一个实例，见部署文档 §11.8）
+│   ├── db.ts                Prisma Client（Workers 下经 SQL Gateway，保留每请求实例隔离）
+│   └── gateway-pg.ts        PrismaPg 的 HTTPS Gateway 适配层（普通查询 + 受控短事务）
 scripts/
 └── hash-password.ts         生成 scrypt 密码哈希 CLI（写入 .env 的 AUTH_PASSWORD_HASH）
 ```

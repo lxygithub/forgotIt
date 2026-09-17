@@ -109,6 +109,7 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 | `NEXTAUTH_SECRET` | ✅ | `openssl rand -base64 32` | 登录会话签名密钥（生产修改后需重新 build） |
 | `AUTH_USERNAME` / `AUTH_PASSWORD(_HASH)` | ✅ | `owner` / 明文或 scrypt 哈希 | 单用户登录凭证；生产推荐哈希（`bun run hash-password` 生成） |
 | `NEXTAUTH_URL` | 生产 ✅ | `https://notes.example.com` | NextAuth 回调基准地址 |
+| `SQL_GATEWAY_URL` | Workers ✅ | `https://db-gateway.ieop.top/v1/query` | 仅 Worker 服务端使用的内网 PostgreSQL Gateway；由 wrangler vars 配置 |
 | `PORT` | — | `3000` | 生产 standalone 监听端口 |
 | `.z-ai-config` | AI 功能需要 | 见[部署文档 §5](./forgotIt部署文档.md#5-ai-能力配置) | Z.ai 凭证文件（`{"baseUrl": "...", "apiKey": "..."}`），放在项目目录 / `~` / `/etc` 任一处 |
 
@@ -118,7 +119,7 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 
 - **框架**：Next.js 16（App Router）+ React 19 + TypeScript
 - **UI**：Tailwind CSS 4 + shadcn/ui + Lucide 图标 + framer-motion
-- **数据**：Prisma ORM。**双部署支持**：Node 部署走 SQLite 单文件（`db/custom.db`）；Cloudflare Workers 部署走**自建 PostgreSQL**（经 Hyperdrive + Workers VPC 连接，2026-09-15 由 D1 迁入，详见《forgotIt部署文档.md》§11.8）
+- **数据**：Prisma ORM。**双部署支持**：Node 部署走 SQLite 单文件（`db/custom.db`）；Cloudflare Workers 部署走**自建 PostgreSQL**（经 Cloudflare WAF + Tunnel + SQL Gateway，数据库端口不暴露公网）。
 - **状态**：Zustand（同步引擎 / 本地覆盖层）+ localStorage（outbox、游标、设备 ID）
 - **AI**：内置平台中立 fetch 层（环境变量优先 → `.z-ai-config` 文件兑底），Prompt 规范对齐开发文档第 16 节
 
@@ -128,7 +129,7 @@ bun run dev                 # 打开 http://localhost:3000，用 .env 里的账�
 - [x] Web 原型 v1.1：语义向量搜索（RRF 混合检索）+ 多设备同步（LWW + 冲突快照）
 - [x] Web 原型 v1.2：单用户鉴权（NextAuth 密码门禁）+ README 与部署文档
 - [x] Web 原型 v1.3：双部署支持（同一代码库 Node + Cloudflare Workers，环境变量切换；Next 升级 16.3.5，AI 层平台中立化）
-- [x] 数据自主：Workers 侧数据库由 Cloudflare D1 迁往**自建 PostgreSQL**（Hyperdrive + Workers VPC，2026-09-15 上线验证通过）
+- [x] 数据自主：Workers 侧数据库由 Cloudflare D1 迁往**自建 PostgreSQL**，现经 WAF + Tunnel + SQL Gateway 访问（数据库端口不暴露公网）
 - [x] 原生移动端开发文档 v1.0（Android/iOS=Flutter，鸿蒙=ArkTS，含 API 契约/同步协议/一致性基准，供本机 AI 执行）
 - [ ] Flutter App（Android + iOS，flutter_gemma 端侧推理，见开发文档 §15 与原生移动端开发文档 §8）
 - [ ] 鸿蒙 App（HarmonyOS NEXT 原生 ArkTS，见原生移动端开发文档 §9）

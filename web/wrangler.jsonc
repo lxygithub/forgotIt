@@ -33,7 +33,8 @@
       "bucket_name": "forgotit-uploads"
     }
   ],
-  // 数据库连接：Worker 经 Hyperdrive 连自建 PostgreSQL（详见部署文档 §11.8）
+  // 数据库连接：Worker 通过 HTTPS 调用内网 SQL Gateway。WAF 仅放行本 Zone 的 Worker 子请求。
+  // Hyperdrive binding 暂保留为回滚通道；SQL_GATEWAY_URL 存在时 src/lib/db.ts 优先使用 Gateway。
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
@@ -48,9 +49,8 @@
     }
   ],
   "vars": {
-    // 2026-09：数据库已迁往自建 PostgreSQL（经 Hyperdrive），驱动开关由 d1 改为 pg。
-    // 回滚：把 DB_DRIVER 改回 "d1" 并还原 src/lib/db.ts 的 D1 分支即可（d1_databases 绑定仍保留）。
-    "DB_DRIVER": "pg",
+    "DB_DRIVER": "gateway",
+    "SQL_GATEWAY_URL": "https://db-gateway.ieop.top/v1/query",
     "STORAGE_DRIVER": "r2",
     // ⚠️ 替换为你的实际访问地址（如 https://forgotit.<account>.workers.dev 或自定义域）
     "NEXTAUTH_URL": "https://forgotit.mewlxyy666.workers.dev",

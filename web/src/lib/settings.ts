@@ -3,10 +3,10 @@
 // 使 Workers/Node 部署都能在界面上直接换模型端点，不再依赖 wrangler secret put。
 //
 // 设计要点：
-//   - ensureSettingTable()：线上 PG 若尚未建此表（老库升级），首次读写时自动
-//     CREATE TABLE IF NOT EXISTS，免去手工迁移步骤（单用户自托管场景务实选择）。
+//   - ensureSettingTable()：先验证既有表。线上 Gateway 使用的应用账号不拥有 DDL 权限；
+//     只有本地旧库确实缺表时才尝试 CREATE，生产迁移必须由数据库 owner 单独执行。
 //   - 所有读取均吞错降级：配置存储永远不能弄崩业务调用链（AI 功能本就允许降级）。
-//   - 短 TTL 内存缓存：AI 每次调用都查一次 DB 太浪费（Hyperdrive 往返），
+//   - 短 TTL 内存缓存：AI 每次调用都查一次 DB 太浪费（Gateway 往返），
 //     30s 缓存 + 写路径主动失效，多实例部署下最多 30s 收敛。
 
 import { db } from '@/lib/db';
@@ -26,7 +26,13 @@ let settingTableReady = false;
 /** 确保 Setting 表存在（幂等；进程内只执行一次）。失败抛出，由调用方决定降级方式 */
 export async function ensureSettingTable(): Promise<void> {
   if (settingTableReady) return;
-  await db.$executeRawUnsafe(CREATE_SETTING_SQL);
+  try {
+    // 已迁移的生产库只需要 SELECT 权限，不能让应用运行时依赖 CREATE 权限。
+    await db.setting.findFirst({ select: { key: true } });
+  } catch {
+    // 兼容本地开发时从旧版本升级、尚未执行 prisma db push 的数据库。
+    await db.$executeRawUnsafe(CREATE_SETTING_SQL);
+  }
   settingTableReady = true;
 }
 

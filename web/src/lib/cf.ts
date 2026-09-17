@@ -1,5 +1,5 @@
 // Cloudflare Workers 运行时访问助手
-// 数据库已迁往自建 PostgreSQL，连接逻辑见 src/lib/db.ts（走 Hyperdrive）；
+// 数据库已迁往自建 PostgreSQL，连接逻辑见 src/lib/db.ts（走 SQL Gateway）；
 // 这里只负责对象存储 R2。
 // binding 约定见 web/wrangler.jsonc：R2 → "BUCKET"。
 //
