@@ -47,6 +47,17 @@ function isReadOnlySql(sql: string): boolean {
   return firstToken === 'SELECT' || firstToken === 'EXPLAIN' || firstToken === 'SHOW';
 }
 
+// Prisma 的查询编译器会把 int64 参数（LIMIT/OFFSET、整数列等）以 BigInt 形式交给适配器，
+// 而 JSON.stringify 遇到 BigInt 会直接抛 "Do not know how to serialize a BigInt"。
+// 这个异常发生在请求发出之前，必须在这里归一化，否则表现为「连不上 Gateway」。
+// 安全整数范围内转 number（LIMIT/OFFSET 等场景），超出范围转十进制字符串由 PostgreSQL 解析。
+function serializeBigInt(_key: string, value: unknown): unknown {
+  if (typeof value !== 'bigint') return value;
+  return value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(value)
+    : value.toString();
+}
+
 function binaryValue(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const binary = value as { $binary?: unknown; encoding?: unknown };
@@ -85,12 +96,14 @@ class GatewayApi {
       response = await fetch(this.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(body, serializeBigInt),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
-      const detail = error instanceof Error && error.message ? `：${error.message}` : '';
-      throw new GatewayDatabaseError(`无法连接 SQL Gateway${detail}`);
+      // 请求发出前的本地异常（如参数无法序列化）在这里会表现为「连不上」，
+      // 必须带上原始原因，否则线上只能看到 XX000 无法连接 SQL Gateway。
+      const reason = error instanceof Error && error.message ? error.message : String(error);
+      throw new GatewayDatabaseError(`无法连接 SQL Gateway：${reason}`);
     }
     const payload = await response.json().catch(() => undefined) as T | GatewayFailure | undefined;
     if (!response.ok) {
