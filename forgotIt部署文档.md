@@ -734,6 +734,7 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | 症状 | 原因 | 处理 |
 | --- | --- | --- |
 | Prisma 报 `could not locate the Query Engine` | 用了 Node 客户端（无 wasm 变体） | 走 `bun run build:cf` 全链路（会自动生成 workerd 客户端），勿单独手工 generate |
+| Worker 报 `无法连接 SQL Gateway`（Prisma 包成 `PostgresError XX000`），但 Nginx 与网关**零日志**、错误在 ~0ms 返回 | 适配器把 Prisma 的 BigInt 参数（int64：`LIMIT`/`OFFSET`、`COUNT`、整数列）直接交给 `JSON.stringify` → `TypeError: Do not know how to serialize a BigInt`；异常发生在**请求发出之前**，又被统一 `catch` 包成连接错误（2026-09-17 实战：首页列表、`/api/stats`、`/api/sync/pull` 全部 500，一度误判为 WAF/Tunnel） | 已在 `gateway-pg.ts` 加 `serializeBigInt` replacer（安全整数转 number、超出转十进制字符串），并让 `catch` 保留 `error.message`。排查口诀：**0ms 返回 + 网关零日志 = 客户端问题**，不要再去查 WAF |
 | `WebAssembly.compile(): code generation disallowed` | workerd 禁止运行时 wasm 编译 | 确认用的是新生成器（`runtime = "workerd"`，`?module` 静态导入），不要回退 FORCE_WASM/readFileSync 方案 |
 | `next build` / OpenNext 打包被 OOM kill（137） | ① Next 16 已移除 `turbopack.memoryLimit`（写了被静默忽略），默认驱逐策略内存峰值高；② OpenNext esbuild（Go）打包 35MB 级 worker 峰值也高；③ 同机 dev server 常驻占 ~300MB 就足以压垮峰值（实战教训：cf15-17 连续被杀全是它在场） | 三保险已内置：`experimental.turbopackMemoryEviction: "full"` + `experimental.cpus: 1`（均在 next.config.ts）+ 构建前 `export GOGC=30 GOMEMLIMIT=1200MiB`（治 esbuild）。实测 4GB cgroup 通过（附录 #18）；≥8GB 机器无需任何额外配置；4GB 机器构建前停掉 dev server（§11.0 第 2 条） |
 | D1 交互式事务报错 | D1 适配器仅支持批事务（运行时日志有 `prisma:warn Cloudflare D1 does not support transactions` 提示，属预期） | 本项目唯一事务是数组批形式（`embedding.ts`），天然兼容；新增代码请勿用回调式事务 |
@@ -911,6 +912,8 @@ Worker 变量：
 3. 从浏览器或 curl 请求 Gateway 必须得到 Cloudflare `403`；
 4. 用 Worker 执行无副作用的 Prisma `note.count()`，确认网关审计日志出现对应 SQL 指纹；
 5. 调用 `/api/settings/ai`，确认既有 `Setting` 表可读写，但不会再由应用自动建表。
+6. 跑一次真实的 `note.findMany()`（列表页）与 `/api/sync/pull`，确认适配器不会因 BigInt 参数
+   序列化失败而被误报成「无法连接 SQL Gateway」（见 §11.6 对应排障行）。
 
 ---
 
