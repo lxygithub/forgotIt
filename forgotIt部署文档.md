@@ -682,12 +682,17 @@ bun run deploy:cf
 | 字段 | 填写值 |
 | --- | --- |
 | Root directory（根目录） | `web` |
-| Build command（构建命令） | `node scripts/gen-workers-schema.mjs && npx prisma generate --schema prisma/schema.workers.prisma && npx opennextjs-cloudflare build` |
+| Build command（构建命令） | `node scripts/gen-workers-schema.mjs && npx prisma generate --schema prisma/schema.workers.prisma && npx opennextjs-cloudflare build && node scripts/prepare-prisma-wasm.mjs` |
 | Deploy command（部署命令） | `npx opennextjs-cloudflare deploy` |
 
 - Build command 是 `bun run build:cf` 的无 bun 等价链（CI 镜像不保证有 bun；`gen-workers-schema.mjs`
-  只用 `node:fs`，node 可直接跑）。三步缺一不可：派生 workers schema → 生成 workerd 客户端 →
-  OpenNext 构建；少任何一步都会在运行时或部署时炸（见 §11.6 前两行）。
+  与 `prepare-prisma-wasm.mjs` 都只用 `node:fs`/`node:path`，node 可直接跑）。**四步缺一不可**：
+  派生 workers schema → 生成 workerd 客户端 → OpenNext 构建 → 落地静态 Prisma WASM 并补丁加载器；
+  少任何一步都会在运行时或部署时炸（见 §11.6 前两行）。
+- 第四步 `prepare-prisma-wasm.mjs` 是把 `.open-next/server-functions/default/node_modules/.prisma/client/query_engine_bg.wasm`
+  复制成 `.open-next/static/wasm/prisma-query-engine.wasm`，并把 handler 里的动态 `import("…/query_engine_bg.wasm")`
+  改写成读取该静态模块——`worker-wrapper.mjs` 第 4 行就是静态 import 它。`.open-next/` 在 `.gitignore` 里，
+  **CI 必须自己生成**；漏掉这一步 deploy 阶段会直接报 `ENOENT … prisma-query-engine.wasm`。
 - Deploy command **不要用 Workers Builds 默认的 `npx wrangler deploy`**：它会因 `.open-next/`
   未构建而报 entry-point not found 或走到上面的静态探测报错；`opennextjs-cloudflare deploy`
   会先校验产物再调 wrangler，报错可读。
@@ -734,6 +739,7 @@ GOGC=30 GOMEMLIMIT=1200MiB bun run build:cf && bunx wrangler dev --port 8787
 | 症状 | 原因 | 处理 |
 | --- | --- | --- |
 | Prisma 报 `could not locate the Query Engine` | 用了 Node 客户端（无 wasm 变体） | 走 `bun run build:cf` 全链路（会自动生成 workerd 客户端），勿单独手工 generate |
+| Workers Builds 报 `✘ [ERROR] ENOENT: no such file or directory, open '…/.open-next/static/wasm/prisma-query-engine.wasm' [plugin wrangler-module-collector]`（由 `worker-wrapper.mjs:4` 的静态 import 触发），构建其它步骤都成功 | Git 集成的 Build command 少了第四步 `node scripts/prepare-prisma-wasm.mjs`——该文件由构建期生成、`.open-next/` 不入库，缺它就一定 ENOENT（2026-09-17 实战：本地 `deploy:cf` 能过一次，是因为包链里含此步） | 按 §11.4 的表格把 Build command 补齐四步后重新构建；本地可用 `cd web && node scripts/gen-workers-schema.mjs && npx prisma generate --schema prisma/schema.workers.prisma && npx opennextjs-cloudflare build && node scripts/prepare-prisma-wasm.mjs` 全程以 node 复现 CI（勿用 bun，CI 镜像不保证有） |
 | Worker 报 `无法连接 SQL Gateway`（Prisma 包成 `PostgresError XX000`），但 Nginx 与网关**零日志**、错误在 ~0ms 返回 | 适配器把 Prisma 的 BigInt 参数（int64：`LIMIT`/`OFFSET`、`COUNT`、整数列）直接交给 `JSON.stringify` → `TypeError: Do not know how to serialize a BigInt`；异常发生在**请求发出之前**，又被统一 `catch` 包成连接错误（2026-09-17 实战：首页列表、`/api/stats`、`/api/sync/pull` 全部 500，一度误判为 WAF/Tunnel） | 已在 `gateway-pg.ts` 加 `serializeBigInt` replacer（安全整数转 number、超出转十进制字符串），并让 `catch` 保留 `error.message`。排查口诀：**0ms 返回 + 网关零日志 = 客户端问题**，不要再去查 WAF |
 | `WebAssembly.compile(): code generation disallowed` | workerd 禁止运行时 wasm 编译 | 确认用的是新生成器（`runtime = "workerd"`，`?module` 静态导入），不要回退 FORCE_WASM/readFileSync 方案 |
 | `next build` / OpenNext 打包被 OOM kill（137） | ① Next 16 已移除 `turbopack.memoryLimit`（写了被静默忽略），默认驱逐策略内存峰值高；② OpenNext esbuild（Go）打包 35MB 级 worker 峰值也高；③ 同机 dev server 常驻占 ~300MB 就足以压垮峰值（实战教训：cf15-17 连续被杀全是它在场） | 三保险已内置：`experimental.turbopackMemoryEviction: "full"` + `experimental.cpus: 1`（均在 next.config.ts）+ 构建前 `export GOGC=30 GOMEMLIMIT=1200MiB`（治 esbuild）。实测 4GB cgroup 通过（附录 #18）；≥8GB 机器无需任何额外配置；4GB 机器构建前停掉 dev server（§11.0 第 2 条） |
